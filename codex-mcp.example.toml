@@ -1,0 +1,5 @@
+[mcp_servers.yandex-tracker]
+command = "python3"
+args = ["-m", "yandex_tracker_mcp_server"]
+cwd = "/Users/snafy/Projects/yandex-tracker-mcp"
+env = { YANDEX_TRACKER_TOKEN = "put-token-here", YANDEX_TRACKER_ORG_ID = "put-org-id-here" }
