@@ -3,35 +3,87 @@
 Small stdio MCP server for Yandex Tracker. It exposes tools for reading,
 searching, creating, updating, commenting on, and transitioning Tracker issues.
 
-## Configuration
+## Usage with Codex
 
-Set these environment variables before starting the server:
-
-```sh
-export YANDEX_TRACKER_TOKEN="..."
-export YANDEX_TRACKER_ORG_ID="..."
-```
-
-For cloud organizations, use `YANDEX_TRACKER_CLOUD_ORG_ID` instead of
-`YANDEX_TRACKER_ORG_ID`. Optional variables:
-
-- `YANDEX_TRACKER_AUTH_SCHEME`, default `OAuth`
-- `YANDEX_TRACKER_BASE_URL`, default `https://api.tracker.yandex.net/v2`
-- `YANDEX_TRACKER_TIMEOUT`, default `30`
-
-## Codex MCP config
+Add the server to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.yandex-tracker]
-command = "python3"
-args = ["-m", "yandex_tracker_mcp_server"]
-cwd = "/Users/snafy/Projects/yandex-tracker-mcp"
-env = { YANDEX_TRACKER_TOKEN = "...", YANDEX_TRACKER_ORG_ID = "..." }
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git",
+  "yandex-tracker-mcp",
+]
+
+[mcp_servers.yandex-tracker.env]
+YANDEX_TRACKER_TOKEN = "..."
+YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
+
+For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
+`YANDEX_TRACKER_CLOUD_ORG_ID`.
+
+Restart Codex after changing the config. The server exposes tools named
+`tracker_*`, such as `tracker_get_issue`, `tracker_search_issues`, and
+`tracker_add_comment`.
+
+## Usage with Claude Code
+
+Add the server with the Claude Code CLI:
+
+```sh
+claude mcp add --transport stdio \
+  --env YANDEX_TRACKER_TOKEN="..." \
+  --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
+  yandex-tracker \
+  -- uvx --from git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git yandex-tracker-mcp
+```
+
+For a non-cloud organization, use `--env YANDEX_TRACKER_ORG_ID="..."` instead
+of `YANDEX_TRACKER_CLOUD_ORG_ID`.
+
+Verify the Claude Code registration:
+
+```sh
+claude mcp list
+claude mcp get yandex-tracker
+```
+
+Inside Claude Code, use `/mcp` to check the server connection and tools.
+
+## Environment
+
+Required:
+
+- `YANDEX_TRACKER_TOKEN`: OAuth or IAM token.
+- One organization id: `YANDEX_TRACKER_CLOUD_ORG_ID` for cloud organizations or
+  `YANDEX_TRACKER_ORG_ID` for non-cloud organizations.
+
+Optional:
+
+- `YANDEX_TRACKER_AUTH_SCHEME`: `OAuth` by default. Use `Bearer` for IAM tokens.
+- `YANDEX_TRACKER_BASE_URL`: `https://api.tracker.yandex.net` by default.
+- `YANDEX_TRACKER_TIMEOUT`: `30` by default.
+
+## Verify locally
+
+Run the MCP server and ask for its tool list:
+
+```sh
+YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
+  uvx --from git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git yandex-tracker-mcp <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+The response should be a JSON-RPC object with `tracker_*` tools. The server is
+stdio-only, so stdout is reserved for MCP JSON-RPC messages.
 
 ## Development
 
 ```sh
+git clone git@github.com:kawaii-snafy/yandex-tracker-mcp.git
+cd yandex-tracker-mcp
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
 python3 -m unittest discover -s tests
-printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | python3 -m yandex_tracker_mcp_server
 ```

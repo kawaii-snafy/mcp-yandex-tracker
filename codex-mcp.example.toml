@@ -1,5 +1,11 @@
 [mcp_servers.yandex-tracker]
-command = "python3"
-args = ["-m", "yandex_tracker_mcp_server"]
-cwd = "/Users/snafy/Projects/yandex-tracker-mcp"
-env = { YANDEX_TRACKER_TOKEN = "put-token-here", YANDEX_TRACKER_ORG_ID = "put-org-id-here" }
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git",
+  "yandex-tracker-mcp",
+]
+
+[mcp_servers.yandex-tracker.env]
+YANDEX_TRACKER_TOKEN = "put-token-here"
+YANDEX_TRACKER_CLOUD_ORG_ID = "put-cloud-org-id-here"

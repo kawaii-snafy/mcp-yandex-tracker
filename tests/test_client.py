@@ -92,6 +92,23 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(TrackerConfigError):
             TrackerConfig.from_env({"YANDEX_TRACKER_TOKEN": "secret"})
 
+    def test_env_config_accepts_tracker_env(self):
+        config = TrackerConfig.from_env(
+            {
+                "YANDEX_TRACKER_TOKEN": "secret",
+                "YANDEX_TRACKER_CLOUD_ORG_ID": "cloud",
+                "YANDEX_TRACKER_BASE_URL": "https://tracker.test/v2/",
+                "YANDEX_TRACKER_AUTH_SCHEME": "Bearer",
+                "YANDEX_TRACKER_TIMEOUT": "12.5",
+            }
+        )
+
+        self.assertEqual(config.token, "secret")
+        self.assertEqual(config.cloud_org_id, "cloud")
+        self.assertEqual(config.base_url, "https://tracker.test/v2")
+        self.assertEqual(config.auth_scheme, "Bearer")
+        self.assertEqual(config.timeout, 12.5)
+
     def test_tracker_client_kwargs_preserve_auth_and_base_url(self):
         config = TrackerConfig(
             token="secret",

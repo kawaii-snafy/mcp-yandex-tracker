@@ -30,13 +30,13 @@ class TrackerConfig:
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "TrackerConfig":
         values = env if env is not None else os.environ
-        token = values.get("YANDEX_TRACKER_TOKEN") or values.get("TRACKER_TOKEN")
+        token = values.get("YANDEX_TRACKER_TOKEN")
         if not token:
             raise TrackerConfigError(
                 "Set YANDEX_TRACKER_TOKEN with an OAuth or IAM token for Yandex Tracker."
             )
 
-        org_id = values.get("YANDEX_TRACKER_ORG_ID") or values.get("TRACKER_ORG_ID")
+        org_id = values.get("YANDEX_TRACKER_ORG_ID")
         cloud_org_id = values.get("YANDEX_TRACKER_CLOUD_ORG_ID")
         if not org_id and not cloud_org_id:
             raise TrackerConfigError(
