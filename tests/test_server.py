@@ -167,6 +167,27 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response["id"], 1)
         self.assertIn("tools", response["result"])
 
+    def test_stdio_batch_invalid_item_does_not_suppress_valid_response(self):
+        input_stream = io.StringIO(
+            json.dumps(
+                [
+                    {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                    1,
+                ]
+            )
+            + "\n"
+        )
+        output_stream = io.StringIO()
+
+        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
+
+        response = json.loads(output_stream.getvalue())
+        self.assertEqual(len(response), 2)
+        self.assertEqual(response[0]["id"], 1)
+        self.assertIn("tools", response[0]["result"])
+        self.assertEqual(response[1]["id"], None)
+        self.assertEqual(response[1]["error"]["code"], -32600)
+
     def test_notifications_do_not_emit_response(self):
         input_stream = io.StringIO(
             json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"

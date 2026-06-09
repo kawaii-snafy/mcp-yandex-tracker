@@ -9,8 +9,9 @@ from yandex_tracker_mcp_server.client import (
 
 
 class FakeCollection:
-    def __init__(self, items=None):
+    def __init__(self, items=None, find_result=None):
         self.items = items or {}
+        self.find_result = find_result
         self.created = []
         self.find_calls = []
 
@@ -23,7 +24,17 @@ class FakeCollection:
 
     def find(self, **kwargs):
         self.find_calls.append(kwargs)
+        if self.find_result is not None:
+            return self.find_result
         return [{"key": "TEST-1"}]
+
+
+class FakeSeekablePaginatedList:
+    def __iter__(self):
+        return iter([FakeIssue("TEST-1")])
+
+    def __str__(self):
+        return "<SeekablePaginatedList>"
 
 
 class FakeTransition:
@@ -80,9 +91,9 @@ class FakeIssue:
 
 
 class FakeSdkClient:
-    def __init__(self, issue):
+    def __init__(self, issue, find_result=None):
         self.issue = issue
-        self.issues = FakeCollection({issue.key: issue})
+        self.issues = FakeCollection({issue.key: issue}, find_result=find_result)
 
 
 class ClientTests(unittest.TestCase):
@@ -156,6 +167,16 @@ class ClientTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_search_issues_materializes_sdk_paginated_list(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(
+            tracker_client=FakeSdkClient(issue, find_result=FakeSeekablePaginatedList())
+        )
+
+        result = client.search_issues(per_page=1)
+
+        self.assertEqual(result, [{"key": "TEST-1"}])
 
     def test_update_issue_uses_official_sdk_issue_update(self):
         issue = FakeIssue("TEST-1")

@@ -75,18 +75,18 @@ class YandexTrackerClient:
         per_page: int = 20,
         page: int = 1,
     ) -> Any:
-        return _to_plain(
-            self._call_sdk(
-                lambda client: client.issues.find(
-                    query=query,
-                    filter=filter,
-                    order=order,
-                    keys=keys,
-                    per_page=per_page,
-                    page=page,
-                )
+        def search(client: Any) -> Any:
+            issues = client.issues.find(
+                query=query,
+                filter=filter,
+                order=order,
+                keys=keys,
+                per_page=per_page,
+                page=page,
             )
-        )
+            return list(issues)
+
+        return _to_plain(self._call_sdk(search))
 
     def create_issue(
         self,

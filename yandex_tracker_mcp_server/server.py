@@ -283,7 +283,7 @@ def serve_stdio(
             messages = json.loads(line)
             batch = isinstance(messages, list)
             items = messages if batch else [messages]
-            responses = [server.handle_message(item) for item in items]
+            responses = [_handle_stdio_item(server, item) for item in items]
             responses = [response for response in responses if response is not None]
             if not responses:
                 continue
@@ -292,3 +292,16 @@ def serve_stdio(
             payload = {"jsonrpc": JSONRPC_VERSION, "id": None, "error": _error_payload(exc)}
         output_stream.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
         output_stream.flush()
+
+
+def _handle_stdio_item(server: McpServer, item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return {
+            "jsonrpc": JSONRPC_VERSION,
+            "id": None,
+            "error": {"code": -32600, "message": "Invalid Request"},
+        }
+    try:
+        return server.handle_message(item)
+    except Exception as exc:
+        return {"jsonrpc": JSONRPC_VERSION, "id": item.get("id"), "error": _error_payload(exc)}
