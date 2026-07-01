@@ -16,7 +16,7 @@ tests/             # unittest suite over fakes (no network)
 
 Entry points, all reaching `serve_stdio()`:
 
-- console script `yandex-tracker-mcp` (declared in `pyproject.toml`)
+- console script `mcp-yandex-tracker` (declared in `pyproject.toml`)
 - `python -m yandex_tracker_mcp_server`
 - `python run_server.py`
 

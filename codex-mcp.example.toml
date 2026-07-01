@@ -1,10 +1,6 @@
 [mcp_servers.yandex-tracker]
 command = "uvx"
-args = [
-  "--from",
-  "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git",
-  "yandex-tracker-mcp",
-]
+args = ["mcp-yandex-tracker"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "put-token-here"

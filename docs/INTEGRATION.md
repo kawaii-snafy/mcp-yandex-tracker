@@ -43,16 +43,15 @@ Add to `~/.codex/config.toml` (see `codex-mcp.example.toml` in the repo root):
 ```toml
 [mcp_servers.yandex-tracker]
 command = "uvx"
-args = [
-  "--from",
-  "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git",
-  "yandex-tracker-mcp",
-]
+args = ["mcp-yandex-tracker"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
+
+To run from source instead of the published package, use
+`args = ["--from", "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git", "mcp-yandex-tracker"]`.
 
 Restart Codex after editing the config.
 
@@ -63,7 +62,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- uvx --from git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git yandex-tracker-mcp
+  -- uvx mcp-yandex-tracker
 ```
 
 Verify with `claude mcp list`, `claude mcp get yandex-tracker`, and `/mcp`
@@ -71,7 +70,7 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 
 ### Any MCP host
 
-Point the host at the console script `yandex-tracker-mcp` (installed by the
+Point the host at the console script `mcp-yandex-tracker` (installed by the
 package), or run it explicitly:
 
 - `python -m yandex_tracker_mcp_server`
@@ -83,7 +82,7 @@ Pipe a raw request in and read the response back:
 
 ```sh
 YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
-  yandex-tracker-mcp <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+  uvx mcp-yandex-tracker <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 `tools/list` needs no credentials, so it is the safest first check — a healthy

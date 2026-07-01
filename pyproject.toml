@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "yandex-tracker-mcp"
+name = "mcp-yandex-tracker"
 version = "0.1.0"
 description = "MCP stdio server for Yandex Tracker"
 readme = "README.md"
@@ -31,7 +31,7 @@ Repository = "https://github.com/kawaii-snafy/yandex-tracker-mcp"
 Issues = "https://github.com/kawaii-snafy/yandex-tracker-mcp/issues"
 
 [project.scripts]
-yandex-tracker-mcp = "yandex_tracker_mcp_server.__main__:main"
+mcp-yandex-tracker = "yandex_tracker_mcp_server.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["yandex_tracker_mcp_server*"]

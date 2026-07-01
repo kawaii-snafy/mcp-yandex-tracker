@@ -10,15 +10,18 @@ Add the server to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.yandex-tracker]
 command = "uvx"
-args = [
-  "--from",
-  "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git",
-  "yandex-tracker-mcp",
-]
+args = ["mcp-yandex-tracker"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
+```
+
+To run the latest unreleased code straight from source instead, replace the
+`args` line with:
+
+```toml
+args = ["--from", "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git", "mcp-yandex-tracker"]
 ```
 
 For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
@@ -37,7 +40,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- uvx --from git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git yandex-tracker-mcp
+  -- uvx mcp-yandex-tracker
 ```
 
 For a non-cloud organization, use `--env YANDEX_TRACKER_ORG_ID="..."` instead
@@ -72,7 +75,7 @@ Run the MCP server and ask for its tool list:
 
 ```sh
 YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
-  uvx --from git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git yandex-tracker-mcp <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+  uvx mcp-yandex-tracker <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 The response should be a JSON-RPC object with `tracker_*` tools. The server is
