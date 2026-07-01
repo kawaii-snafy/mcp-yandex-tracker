@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,26 @@ description = "MCP stdio server for Yandex Tracker"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "snafy" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["mcp", "yandex-tracker", "llm", "agents", "stdio"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+]
 dependencies = ["yandex_tracker_client>=2.10"]
+
+[project.urls]
+Homepage = "https://github.com/kawaii-snafy/yandex-tracker-mcp"
+Repository = "https://github.com/kawaii-snafy/yandex-tracker-mcp"
+Issues = "https://github.com/kawaii-snafy/yandex-tracker-mcp/issues"
 
 [project.scripts]
 yandex-tracker-mcp = "yandex_tracker_mcp_server.__main__:main"
