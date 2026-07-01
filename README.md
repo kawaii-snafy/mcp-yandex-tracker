@@ -78,6 +78,15 @@ YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
 The response should be a JSON-RPC object with `tracker_*` tools. The server is
 stdio-only, so stdout is reserved for MCP JSON-RPC messages.
 
+## Documentation
+
+Deeper docs live in [`docs/`](docs/README.md):
+
+- [INTEGRATION.md](docs/INTEGRATION.md) — connect the server to a host.
+- [TOOLS.md](docs/TOOLS.md) — full tool reference with arguments.
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the server works internally.
+- [EXTENDING.md](docs/EXTENDING.md) — add tools, rules, and scaling notes.
+
 ## Development
 
 ```sh
