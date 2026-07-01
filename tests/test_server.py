@@ -56,7 +56,7 @@ class ServerTests(unittest.TestCase):
         )
 
         result = response["result"]
-        self.assertEqual(result["serverInfo"]["name"], "yandex-tracker-mcp")
+        self.assertEqual(result["serverInfo"]["name"], "mcp-yandex-tracker")
         self.assertIn("tools", result["capabilities"])
 
     def test_tools_list_exposes_tracker_tools(self):

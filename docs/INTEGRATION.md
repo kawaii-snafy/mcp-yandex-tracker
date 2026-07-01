@@ -51,7 +51,7 @@ YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
 To run from source instead of the published package, use
-`args = ["--from", "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git", "mcp-yandex-tracker"]`.
+`args = ["--from", "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git", "mcp-yandex-tracker"]`.
 
 Restart Codex after editing the config.
 

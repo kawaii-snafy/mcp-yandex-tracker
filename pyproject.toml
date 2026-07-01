@@ -26,9 +26,9 @@ classifiers = [
 dependencies = ["yandex_tracker_client>=2.10"]
 
 [project.urls]
-Homepage = "https://github.com/kawaii-snafy/yandex-tracker-mcp"
-Repository = "https://github.com/kawaii-snafy/yandex-tracker-mcp"
-Issues = "https://github.com/kawaii-snafy/yandex-tracker-mcp/issues"
+Homepage = "https://github.com/kawaii-snafy/mcp-yandex-tracker"
+Repository = "https://github.com/kawaii-snafy/mcp-yandex-tracker"
+Issues = "https://github.com/kawaii-snafy/mcp-yandex-tracker/issues"
 
 [project.scripts]
 mcp-yandex-tracker = "yandex_tracker_mcp_server.__main__:main"

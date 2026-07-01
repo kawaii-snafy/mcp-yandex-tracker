@@ -21,7 +21,7 @@ To run the latest unreleased code straight from source instead, replace the
 `args` line with:
 
 ```toml
-args = ["--from", "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git", "mcp-yandex-tracker"]
+args = ["--from", "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git", "mcp-yandex-tracker"]
 ```
 
 For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
@@ -93,8 +93,8 @@ Deeper docs live in [`docs/`](docs/README.md):
 ## Development
 
 ```sh
-git clone git@github.com:kawaii-snafy/yandex-tracker-mcp.git
-cd yandex-tracker-mcp
+git clone git@github.com:kawaii-snafy/mcp-yandex-tracker.git
+cd mcp-yandex-tracker
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 python3 -m unittest discover -s tests

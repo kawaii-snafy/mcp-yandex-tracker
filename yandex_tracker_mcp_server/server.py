@@ -161,7 +161,7 @@ class McpServer:
                     "resources": {},
                     "prompts": {},
                 },
-                "serverInfo": {"name": "yandex-tracker-mcp", "version": __version__},
+                "serverInfo": {"name": "mcp-yandex-tracker", "version": __version__},
             }
         if method == "ping":
             return {}
