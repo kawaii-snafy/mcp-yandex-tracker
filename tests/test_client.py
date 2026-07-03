@@ -36,18 +36,34 @@ class FakeCollection:
 class FakeDictCollection:
     def __init__(self, items):
         self._items = list(items)
+        self.get_all_calls = []
 
-    def get_all(self):
+    def get_all(self, **kwargs):
+        self.get_all_calls.append(kwargs)
         return list(self._items)
+
+    def __getitem__(self, key):
+        for item in self._items:
+            if str(item.get("id")) == str(key) or str(item.get("login")) == str(key):
+                return item
+        raise KeyError(key)
 
 
 class FakeConnection:
-    def __init__(self):
+    def __init__(self, tags=None):
         self.deleted = []
+        self.gets = []
+        self._tags = list(tags if tags is not None else ["backend", "urgent"])
 
     def delete(self, path):
         self.deleted.append(path)
         return {"deleted": path}
+
+    def get(self, path, params=None):
+        self.gets.append(path)
+        if path.endswith("/tags"):
+            return list(self._tags)
+        return None
 
 
 class FakeLink:
@@ -95,6 +111,10 @@ class FakeAttachment:
         self.size = size
         self.content = f"/v2/issues/TEST-1/attachments/{attachment_id}/{name}"
         self.chunks = chunks or [b"chunk1", b"chunk2"]
+        self.deleted_calls = 0
+
+    def delete(self):
+        self.deleted_calls += 1
 
     def as_dict(self):
         return {"id": self.id, "name": self.name, "size": self.size}
@@ -123,10 +143,12 @@ class FakeAttachments:
 
 
 class FakeQueue:
-    def __init__(self, key, versions=None, components=None):
+    def __init__(self, key, versions=None, components=None, local_fields=None):
         self.key = key
         self.versions = list(versions or [])
         self.components = list(components or [])
+        self.local_fields = list(local_fields or [])
+        self._path = f"/v2/queues/{key}"
 
     def as_dict(self):
         return {"key": self.key}
@@ -177,9 +199,22 @@ class FakeTransitionCollection:
         return list(self.transitions.values())
 
 
+class FakeComment:
+    def __init__(self, comment_id, collection):
+        self.id = comment_id
+        self._collection = collection
+
+    def delete(self):
+        self._collection.deleted.append(self.id)
+
+
 class FakeComments:
     def __init__(self):
         self.created = []
+        self.deleted = []
+
+    def __getitem__(self, key):
+        return FakeComment(str(key), self)
 
     def create(self, **kwargs):
         self.created.append(kwargs)
@@ -189,13 +224,23 @@ class FakeComments:
         return [{"id": 1, "text": "hello"}]
 
 
+class FakeChangelog:
+    def __init__(self, items=None):
+        self._items = list(items or [{"id": "cl1"}])
+        self.get_all_calls = []
+
+    def get_all(self, **kwargs):
+        self.get_all_calls.append(kwargs)
+        return list(self._items)
+
+
 class FakeIssue:
     def __init__(self, key, transitions=None, links=None):
         self.key = key
         self.comments = FakeComments()
         self.transitions = FakeTransitionCollection(transitions or [])
         self.links = FakeLinks(links)
-        self.changelog = [{"id": "cl1"}]
+        self.changelog = FakeChangelog()
         self.worklog = FakeCreatableList([{"id": "wl1"}])
         self.checklist_items = FakeCreatableList([{"id": "ci1"}])
         self.attachments = FakeAttachments()
@@ -214,6 +259,7 @@ class FakeSdkClient:
         self.issue = issue
         self.issues = FakeCollection({issue.key: issue}, find_result=find_result)
         self._connection = FakeConnection()
+        self.myself = {"self": "https://tracker/me", "login": "me", "uid": 42}
         self.users = FakeDictCollection([{"id": "user1"}])
         self.statuses = FakeDictCollection([{"key": "open"}])
         self.issue_types = FakeDictCollection([{"key": "bug"}])
@@ -497,6 +543,94 @@ class ClientTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             client.upload_attachment("TEST-1", "/no/such/file.xyz")
+
+    def test_delete_comment_calls_sdk_delete(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.delete_comment("TEST-1", "1")
+
+        self.assertEqual(result, {"deleted": "1", "issue": "TEST-1"})
+        self.assertEqual(issue.comments.deleted, ["1"])
+
+    def test_delete_attachment_calls_sdk_delete(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.delete_attachment("TEST-1", "att1")
+
+        self.assertEqual(result, {"deleted": "att1", "issue": "TEST-1"})
+        self.assertEqual(issue.attachments["att1"].deleted_calls, 1)
+
+    def test_get_user_reads_from_users_collection(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(client.get_user("user1"), {"id": "user1"})
+
+    def test_get_current_user_reads_myself(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(
+            client.get_current_user(),
+            {"self": "https://tracker/me", "login": "me", "uid": 42},
+        )
+
+    def test_list_users_passes_server_side_filters(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.list_users(email="a@b.c", group="42", per_page=50)
+
+        self.assertEqual(result, [{"id": "user1"}])
+        self.assertEqual(
+            sdk_client.users.get_all_calls,
+            [{"email": "a@b.c", "group": "42", "perPage": 50}],
+        )
+
+    def test_list_users_without_filters_sends_no_params(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        client.list_users()
+
+        self.assertEqual(sdk_client.users.get_all_calls, [{}])
+
+    def test_list_queue_local_fields(self):
+        issue = FakeIssue("TEST-1")
+        queue = FakeQueue("TEST", local_fields=[{"id": "customField"}])
+        client = YandexTrackerClient(
+            tracker_client=FakeSdkClient(issue, queues=[queue])
+        )
+
+        self.assertEqual(
+            client.list_queue_local_fields("TEST"), [{"id": "customField"}]
+        )
+
+    def test_list_queue_tags_uses_raw_connection(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        self.assertEqual(client.list_queue_tags("TEST"), ["backend", "urgent"])
+        self.assertEqual(sdk_client._connection.gets, ["/v2/queues/TEST/tags"])
+
+    def test_get_changelog_passes_filters(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.get_changelog(
+            "TEST-1", field="status", change_type="IssueWorkflow", per_page=10
+        )
+
+        self.assertEqual(result, [{"id": "cl1"}])
+        self.assertEqual(
+            issue.changelog.get_all_calls,
+            [{"field": "status", "type": "IssueWorkflow", "perPage": 10}],
+        )
 
     def test_call_sdk_wraps_transport_errors_as_api_errors(self):
         issue = FakeIssue("TEST-1")

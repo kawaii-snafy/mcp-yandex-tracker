@@ -66,11 +66,18 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "tracker_update_issue",
-        "description": "Update fields on a Yandex Tracker issue.",
+        "description": "Update fields on a Yandex Tracker issue. fields is a raw Tracker PATCH "
+        "body, so it also covers: tags via {\"tags\": {\"add\": [...], \"remove\": [...]}} "
+        "(or a full array to replace); components the same way (id or name); parent "
+        "reassignment via {\"parent\": {\"key\": \"TEST-2\"}}. Epic association is a link, not a "
+        "field — use tracker_link_issues for that.",
         "inputSchema": _schema(
             {
                 "issue_key": {"type": "string"},
-                "fields": {"type": "object", "description": "Fields to patch."},
+                "fields": {
+                    "type": "object",
+                    "description": "Fields to patch (raw Tracker API field names and values).",
+                },
             },
             ["issue_key", "fields"],
         ),
@@ -92,6 +99,21 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": _schema(
             {"issue_key": {"type": "string"}},
             ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_delete_comment",
+        "description": "Delete a comment from a Yandex Tracker issue by its comment id "
+        "(get ids from tracker_list_comments).",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "comment_id": {
+                    "type": "string",
+                    "description": "Comment id from tracker_list_comments.",
+                },
+            },
+            ["issue_key", "comment_id"],
         ),
     },
     {
@@ -176,7 +198,33 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "tracker_list_users",
-        "description": "List Yandex Tracker users (for assignee, followers, and other user fields).",
+        "description": "List Yandex Tracker users (for assignee, followers, and other user fields). "
+        "Supports server-side filters: email (exact match) and group. Note: Tracker has no "
+        "server-side search by login or name — fetch and filter client-side for that.",
+        "inputSchema": _schema(
+            {
+                "email": {"type": "string", "description": "Filter by exact email match."},
+                "group": {"type": "string", "description": "Filter by group id."},
+                "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+            }
+        ),
+    },
+    {
+        "name": "tracker_get_user",
+        "description": "Get a single Yandex Tracker user by login or uid.",
+        "inputSchema": _schema(
+            {
+                "login_or_uid": {
+                    "type": "string",
+                    "description": "User login (e.g. jsmith) or numeric uid.",
+                }
+            },
+            ["login_or_uid"],
+        ),
+    },
+    {
+        "name": "tracker_get_current_user",
+        "description": "Get the currently authenticated Yandex Tracker user (the token owner).",
         "inputSchema": _schema({}),
     },
     {
@@ -221,10 +269,39 @@ TOOLS: list[dict[str, Any]] = [
         ),
     },
     {
-        "name": "tracker_get_changelog",
-        "description": "Get the change history of a Yandex Tracker issue.",
+        "name": "tracker_list_queue_local_fields",
+        "description": "List local (queue-specific custom) fields of a Yandex Tracker queue. "
+        "Unlike tracker_list_fields, these are scoped to the queue.",
         "inputSchema": _schema(
-            {"issue_key": {"type": "string"}},
+            {"queue": {"type": "string", "description": "Queue key, e.g. TEST."}},
+            ["queue"],
+        ),
+    },
+    {
+        "name": "tracker_list_queue_tags",
+        "description": "List tags defined in a specific Yandex Tracker queue.",
+        "inputSchema": _schema(
+            {"queue": {"type": "string", "description": "Queue key, e.g. TEST."}},
+            ["queue"],
+        ),
+    },
+    {
+        "name": "tracker_get_changelog",
+        "description": "Get the change history of a Yandex Tracker issue. "
+        "Optionally filter by field and change type.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "field": {
+                    "type": "string",
+                    "description": "Filter to changes of a single field id, e.g. status.",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Filter by change type, e.g. IssueWorkflow, IssueUpdated.",
+                },
+                "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
             ["issue_key"],
         ),
     },
@@ -326,6 +403,21 @@ TOOLS: list[dict[str, Any]] = [
             ["issue_key", "file_path"],
         ),
     },
+    {
+        "name": "tracker_delete_attachment",
+        "description": "Delete an attachment from a Yandex Tracker issue by its attachment id "
+        "(get ids from tracker_list_attachments).",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "attachment_id": {
+                    "type": "string",
+                    "description": "Attachment id from tracker_list_attachments.",
+                },
+            },
+            ["issue_key", "attachment_id"],
+        ),
+    },
 ]
 
 
@@ -411,6 +503,10 @@ class McpServer:
                 _required(a, "text"),
             ),
             "tracker_list_comments": lambda c, a: c.list_comments(_required(a, "issue_key")),
+            "tracker_delete_comment": lambda c, a: c.delete_comment(
+                _required(a, "issue_key"),
+                _required(a, "comment_id"),
+            ),
             "tracker_list_transitions": lambda c, a: c.list_transitions(_required(a, "issue_key")),
             "tracker_move_issue_status": lambda c, a: c.move_issue_status(
                 _required(a, "issue_key"),
@@ -433,7 +529,13 @@ class McpServer:
                 _required(a, "link_id"),
             ),
             "tracker_list_queues": lambda c, a: c.list_queues(),
-            "tracker_list_users": lambda c, a: c.list_users(),
+            "tracker_list_users": lambda c, a: c.list_users(
+                email=a.get("email"),
+                group=a.get("group"),
+                per_page=_opt_int_arg(a, "per_page"),
+            ),
+            "tracker_get_user": lambda c, a: c.get_user(_required(a, "login_or_uid")),
+            "tracker_get_current_user": lambda c, a: c.get_current_user(),
             "tracker_list_statuses": lambda c, a: c.list_statuses(),
             "tracker_list_issue_types": lambda c, a: c.list_issue_types(),
             "tracker_list_priorities": lambda c, a: c.list_priorities(),
@@ -445,7 +547,16 @@ class McpServer:
             "tracker_list_queue_components": lambda c, a: c.list_queue_components(
                 _required(a, "queue")
             ),
-            "tracker_get_changelog": lambda c, a: c.get_changelog(_required(a, "issue_key")),
+            "tracker_list_queue_local_fields": lambda c, a: c.list_queue_local_fields(
+                _required(a, "queue")
+            ),
+            "tracker_list_queue_tags": lambda c, a: c.list_queue_tags(_required(a, "queue")),
+            "tracker_get_changelog": lambda c, a: c.get_changelog(
+                _required(a, "issue_key"),
+                field=a.get("field"),
+                change_type=a.get("type"),
+                per_page=_opt_int_arg(a, "per_page"),
+            ),
             "tracker_list_worklog": lambda c, a: c.list_worklog(_required(a, "issue_key")),
             "tracker_add_worklog": lambda c, a: c.add_worklog(
                 _required(a, "issue_key"),
@@ -471,6 +582,10 @@ class McpServer:
                 _required(a, "file_path"),
                 filename=a.get("filename"),
             ),
+            "tracker_delete_attachment": lambda c, a: c.delete_attachment(
+                _required(a, "issue_key"),
+                _required(a, "attachment_id"),
+            ),
         }
         if name not in handlers:
             raise ValueError(f"Unknown tool: {name}")
@@ -492,6 +607,16 @@ def _required(arguments: dict[str, Any], name: str) -> Any:
 
 def _int_arg(arguments: dict[str, Any], name: str, default: int) -> int:
     value = arguments.get(name, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Argument {name!r} must be an integer, got {value!r}.")
+
+
+def _opt_int_arg(arguments: dict[str, Any], name: str) -> int | None:
+    value = arguments.get(name)
+    if value is None:
+        return None
     try:
         return int(value)
     except (TypeError, ValueError):

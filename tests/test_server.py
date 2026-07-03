@@ -34,6 +34,10 @@ class FakeClient:
         self.calls.append(("list_comments", issue_key))
         return [{"id": 1}]
 
+    def delete_comment(self, issue_key, comment_id):
+        self.calls.append(("delete_comment", issue_key, comment_id))
+        return {"deleted": comment_id, "issue": issue_key}
+
     def list_transitions(self, issue_key):
         self.calls.append(("list_transitions", issue_key))
         return [{"id": "start", "display": "Start progress", "to": {"key": "inProgress"}}]
@@ -62,9 +66,17 @@ class FakeClient:
         self.calls.append(("list_queues",))
         return [{"key": "TEST"}]
 
-    def list_users(self):
-        self.calls.append(("list_users",))
+    def list_users(self, email=None, group=None, per_page=None):
+        self.calls.append(("list_users", email, group, per_page))
         return [{"id": "user1"}]
+
+    def get_user(self, login_or_uid):
+        self.calls.append(("get_user", login_or_uid))
+        return {"login": login_or_uid}
+
+    def get_current_user(self):
+        self.calls.append(("get_current_user",))
+        return {"login": "me"}
 
     def list_statuses(self):
         self.calls.append(("list_statuses",))
@@ -94,8 +106,16 @@ class FakeClient:
         self.calls.append(("list_queue_components", queue))
         return [{"id": "c1"}]
 
-    def get_changelog(self, issue_key):
-        self.calls.append(("get_changelog", issue_key))
+    def list_queue_local_fields(self, queue):
+        self.calls.append(("list_queue_local_fields", queue))
+        return [{"id": "customField"}]
+
+    def list_queue_tags(self, queue):
+        self.calls.append(("list_queue_tags", queue))
+        return ["backend", "urgent"]
+
+    def get_changelog(self, issue_key, field=None, change_type=None, per_page=None):
+        self.calls.append(("get_changelog", issue_key, field, change_type, per_page))
         return [{"id": "cl1"}]
 
     def list_worklog(self, issue_key):
@@ -125,6 +145,10 @@ class FakeClient:
     def upload_attachment(self, issue_key, file_path, filename=None):
         self.calls.append(("upload_attachment", issue_key, file_path, filename))
         return {"id": "att-new"}
+
+    def delete_attachment(self, issue_key, attachment_id):
+        self.calls.append(("delete_attachment", issue_key, attachment_id))
+        return {"deleted": attachment_id, "issue": issue_key}
 
 
 class ServerTests(unittest.TestCase):
@@ -186,6 +210,82 @@ class ServerTests(unittest.TestCase):
             "tracker_upload_attachment",
         ):
             self.assertIn(name, names)
+
+    def test_tools_list_exposes_native_sdk_tools(self):
+        server = McpServer(client_factory=FakeClient)
+
+        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+        names = {tool["name"] for tool in response["result"]["tools"]}
+        for name in (
+            "tracker_get_user",
+            "tracker_get_current_user",
+            "tracker_delete_comment",
+            "tracker_delete_attachment",
+            "tracker_list_queue_local_fields",
+            "tracker_list_queue_tags",
+        ):
+            self.assertIn(name, names)
+
+    def test_native_sdk_tools_route_to_client(self):
+        cases = [
+            (
+                "tracker_get_user",
+                {"login_or_uid": "jsmith"},
+                ("get_user", "jsmith"),
+            ),
+            (
+                "tracker_get_current_user",
+                {},
+                ("get_current_user",),
+            ),
+            (
+                "tracker_delete_comment",
+                {"issue_key": "TEST-1", "comment_id": "5"},
+                ("delete_comment", "TEST-1", "5"),
+            ),
+            (
+                "tracker_delete_attachment",
+                {"issue_key": "TEST-1", "attachment_id": "att1"},
+                ("delete_attachment", "TEST-1", "att1"),
+            ),
+            (
+                "tracker_list_queue_local_fields",
+                {"queue": "TEST"},
+                ("list_queue_local_fields", "TEST"),
+            ),
+            (
+                "tracker_list_queue_tags",
+                {"queue": "TEST"},
+                ("list_queue_tags", "TEST"),
+            ),
+            (
+                "tracker_list_users",
+                {"email": "a@b.c", "group": "42", "per_page": 50},
+                ("list_users", "a@b.c", "42", 50),
+            ),
+            (
+                "tracker_get_changelog",
+                {"issue_key": "TEST-1", "field": "status", "type": "IssueWorkflow"},
+                ("get_changelog", "TEST-1", "status", "IssueWorkflow", None),
+            ),
+        ]
+        for tool_name, arguments, expected_call in cases:
+            with self.subTest(tool=tool_name):
+                fake = FakeClient()
+                server = McpServer(client_factory=lambda fake=fake: fake)
+
+                response = server.handle_message(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 20,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": arguments},
+                    }
+                )
+
+                self.assertFalse(response["result"]["isError"])
+                self.assertEqual(fake.calls, [expected_call])
 
     def test_upload_attachment_routes_to_client(self):
         fake = FakeClient()

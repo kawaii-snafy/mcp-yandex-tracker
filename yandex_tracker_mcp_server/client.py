@@ -138,6 +138,14 @@ class YandexTrackerClient:
 
         return _to_plain(self._call_sdk(get_all))
 
+    def delete_comment(self, issue_key: str, comment_id: str) -> Any:
+        def delete(client: Any) -> Any:
+            comment = client.issues[issue_key].comments[str(comment_id)]
+            comment.delete()
+            return {"deleted": str(comment_id), "issue": issue_key}
+
+        return _to_plain(self._call_sdk(delete))
+
     def list_transitions(self, issue_key: str) -> Any:
         def get_all(client: Any) -> Any:
             issue = client.issues[issue_key]
@@ -205,8 +213,32 @@ class YandexTrackerClient:
     def list_queues(self) -> Any:
         return _to_plain(self._call_sdk(lambda client: list(client.queues.get_all())))
 
-    def list_users(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.users.get_all())))
+    def list_users(
+        self,
+        email: str | None = None,
+        group: str | None = None,
+        per_page: int | None = None,
+    ) -> Any:
+        # email (exact match) and group are the server-side filters the Tracker
+        # users endpoint supports; the SDK passes them through get_all(**params).
+        params: dict[str, Any] = {}
+        if email is not None:
+            params["email"] = email
+        if group is not None:
+            params["group"] = group
+        if per_page is not None:
+            params["perPage"] = per_page
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.users.get_all(**params)))
+        )
+
+    def get_user(self, login_or_uid: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: client.users[str(login_or_uid)])
+        )
+
+    def get_current_user(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: client.myself))
 
     def list_statuses(self) -> Any:
         return _to_plain(self._call_sdk(lambda client: list(client.statuses.get_all())))
@@ -233,10 +265,41 @@ class YandexTrackerClient:
             self._call_sdk(lambda client: list(client.queues[queue].components))
         )
 
-    def get_changelog(self, issue_key: str) -> Any:
+    def list_queue_local_fields(self, queue: str) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.issues[issue_key].changelog))
+            self._call_sdk(lambda client: list(client.queues[queue].local_fields))
         )
+
+    def list_queue_tags(self, queue: str) -> Any:
+        # The SDK has no wrapper for queue tags, so hit the endpoint through the
+        # raw connection the same way the SDK's own queue sub-resources do.
+        def get_tags(client: Any) -> Any:
+            queue_obj = client.queues[queue]
+            return client._connection.get(path=queue_obj._path + "/tags")
+
+        return _to_plain(self._call_sdk(get_tags))
+
+    def get_changelog(
+        self,
+        issue_key: str,
+        field: str | None = None,
+        change_type: str | None = None,
+        per_page: int | None = None,
+    ) -> Any:
+        # field/type filters and perPage are native changelog get-params; the SDK
+        # iterator handles cursor pagination when the result is materialized.
+        params: dict[str, Any] = {}
+        if field is not None:
+            params["field"] = field
+        if change_type is not None:
+            params["type"] = change_type
+        if per_page is not None:
+            params["perPage"] = per_page
+
+        def changelog(client: Any) -> Any:
+            return list(client.issues[issue_key].changelog.get_all(**params))
+
+        return _to_plain(self._call_sdk(changelog))
 
     def list_worklog(self, issue_key: str) -> Any:
         return _to_plain(
@@ -323,6 +386,14 @@ class YandexTrackerClient:
             return attachments.create(file_path, params=params)
 
         return _to_plain(self._call_sdk(upload))
+
+    def delete_attachment(self, issue_key: str, attachment_id: str) -> Any:
+        def delete(client: Any) -> Any:
+            attachment = client.issues[issue_key].attachments[str(attachment_id)]
+            attachment.delete()
+            return {"deleted": str(attachment_id), "issue": issue_key}
+
+        return _to_plain(self._call_sdk(delete))
 
     @staticmethod
     def _build_tracker_client(

@@ -79,7 +79,27 @@ status names for `tracker_move_issue_status`.
 | Argument    | Type   | Req | Notes                          |
 | ----------- | ------ | --- | ------------------------------ |
 | `issue_key` | string | ✅  |                                |
-| `fields`    | object | ✅  | Fields to patch on the issue.  |
+| `fields`    | object | ✅  | Raw Tracker PATCH body — API field names and values. |
+
+`fields` is passed straight through to the Tracker `PATCH` (the SDK adds no
+named handling of its own), so it covers the common "special" cases too:
+
+- **Tags** — add/remove or full replace:
+  ```json
+  {"tags": {"add": ["backend"], "remove": ["stale"]}}
+  {"tags": ["backend", "urgent"]}
+  ```
+- **Components** — a multi-value field, same shape as tags; elements are
+  component id or name (see `tracker_list_queue_components`):
+  ```json
+  {"components": {"add": ["Backend"], "remove": ["Legacy"]}}
+  ```
+- **Parent reassignment** — by key or id:
+  ```json
+  {"parent": {"key": "TEST-2"}}
+  ```
+- **Epic** — an epic association is a **link**, not an issue field. Use
+  `tracker_link_issues` with the appropriate relationship, not `fields`.
 
 ### `tracker_add_comment`
 
@@ -87,6 +107,15 @@ status names for `tracker_move_issue_status`.
 | ----------- | ------ | --- |
 | `issue_key` | string | ✅  |
 | `text`      | string | ✅  |
+
+### `tracker_delete_comment`
+
+Delete a comment by its id (from `tracker_list_comments`).
+
+| Argument     | Type   | Req | Notes                              |
+| ------------ | ------ | --- | ---------------------------------- |
+| `issue_key`  | string | ✅  |                                    |
+| `comment_id` | string | ✅  | Comment id from `tracker_list_comments`. |
 
 ## Links
 
@@ -129,7 +158,7 @@ take no arguments.
 | Tool                            | Argument        | Returns                                   |
 | ------------------------------- | --------------- | ----------------------------------------- |
 | `tracker_list_queues`           | —               | All queues.                               |
-| `tracker_list_users`            | —               | All users (for `assignee`, `followers`).  |
+| `tracker_list_users`            | `email`, `group`, `per_page` (all optional) | Users, optionally server-side filtered (see below). |
 | `tracker_list_statuses`         | —               | Global status dictionary.                 |
 | `tracker_list_issue_types`      | —               | Global issue-type dictionary.             |
 | `tracker_list_priorities`       | —               | Global priority dictionary.               |
@@ -137,16 +166,47 @@ take no arguments.
 | `tracker_list_link_types`       | —               | Link types (valid `relationship` values). |
 | `tracker_list_queue_versions`   | `queue` (string, ✅) | Versions defined in that queue.      |
 | `tracker_list_queue_components` | `queue` (string, ✅) | Components defined in that queue.    |
+| `tracker_list_queue_local_fields` | `queue` (string, ✅) | Local (queue-specific custom) fields. |
+| `tracker_list_queue_tags`       | `queue` (string, ✅) | Tags defined in that queue.          |
+
+### `tracker_list_users` filters
+
+Tracker's users endpoint supports two **server-side** filters, both optional:
+
+| Argument   | Type          | Notes                                       |
+| ---------- | ------------- | ------------------------------------------- |
+| `email`    | string        | Exact-match email filter.                   |
+| `group`    | string        | Group id filter.                            |
+| `per_page` | integer 1–100 | Page size.                                  |
+
+There is **no** server-side search by login or name — fetch the list and match
+client-side for that.
+
+### `tracker_get_user`
+
+Get one user by login or uid.
+
+| Argument       | Type   | Req | Notes                        |
+| -------------- | ------ | --- | ---------------------------- |
+| `login_or_uid` | string | ✅  | Login (e.g. `jsmith`) or uid. |
+
+### `tracker_get_current_user`
+
+Get the authenticated user (the token owner). Takes no arguments.
 
 ## Activity: history, worklog, checklist, attachments
 
 ### `tracker_get_changelog`
 
-Get the change history of an issue.
+Get the change history of an issue. The optional `field` / `type` filters map to
+the native changelog get-params; the SDK iterator handles cursor pagination.
 
-| Argument    | Type   | Req |
-| ----------- | ------ | --- |
-| `issue_key` | string | ✅  |
+| Argument    | Type          | Req | Notes                                          |
+| ----------- | ------------- | --- | ---------------------------------------------- |
+| `issue_key` | string        | ✅  |                                                |
+| `field`     | string        |     | Restrict to changes of a single field id, e.g. `status`. |
+| `type`      | string        |     | Restrict by change type, e.g. `IssueWorkflow`, `IssueUpdated`. |
+| `per_page`  | integer 1–100 |     | Page size.                                     |
 
 ### `tracker_list_worklog` / `tracker_add_worklog`
 
@@ -204,6 +264,15 @@ so a missing/unreadable file returns a clean tool error.
 | `issue_key` | string | ✅  |                                                |
 | `file_path` | string | ✅  | Absolute path to the local file to upload.     |
 | `filename`  | string |     | Name to store the attachment under in Tracker. |
+
+### `tracker_delete_attachment`
+
+Delete an attachment by its id (from `tracker_list_attachments`).
+
+| Argument        | Type   | Req | Notes                               |
+| --------------- | ------ | --- | ----------------------------------- |
+| `issue_key`     | string | ✅  |                                     |
+| `attachment_id` | string | ✅  | Id from `tracker_list_attachments`. |
 
 ## Transitions
 
