@@ -1,6 +1,7 @@
 import unittest
 
 from yandex_tracker_mcp_server.client import (
+    TrackerApiError,
     TrackerConfig,
     TrackerConfigError,
     YandexTrackerClient,
@@ -9,9 +10,10 @@ from yandex_tracker_mcp_server.client import (
 
 
 class FakeCollection:
-    def __init__(self, items=None, find_result=None):
+    def __init__(self, items=None, find_result=None, count_result=0):
         self.items = items or {}
         self.find_result = find_result
+        self.count_result = count_result
         self.created = []
         self.find_calls = []
 
@@ -24,9 +26,121 @@ class FakeCollection:
 
     def find(self, **kwargs):
         self.find_calls.append(kwargs)
+        if kwargs.get("count_only"):
+            return self.count_result
         if self.find_result is not None:
             return self.find_result
         return [{"key": "TEST-1"}]
+
+
+class FakeDictCollection:
+    def __init__(self, items):
+        self._items = list(items)
+
+    def get_all(self):
+        return list(self._items)
+
+
+class FakeConnection:
+    def __init__(self):
+        self.deleted = []
+
+    def delete(self, path):
+        self.deleted.append(path)
+        return {"deleted": path}
+
+
+class FakeLink:
+    def __init__(self, link_id, obj):
+        self.id = link_id
+        self.object = obj
+        self._path = f"/v2/issues/links/{link_id}"
+
+    def as_dict(self):
+        return {"id": self.id, "object": self.object}
+
+
+class FakeLinks:
+    def __init__(self, links=None):
+        self.links = list(links or [])
+        self.created = []
+
+    def __iter__(self):
+        return iter(self.links)
+
+    def create(self, **kwargs):
+        self.created.append(kwargs)
+        return {"id": "new", **kwargs}
+
+
+class FakeCreatableList:
+    """Iterable collection that also records create() calls (worklog, checklist)."""
+
+    def __init__(self, items=None):
+        self.items = list(items or [])
+        self.created = []
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def create(self, **kwargs):
+        self.created.append(kwargs)
+        return {"id": "new", **kwargs}
+
+
+class FakeAttachment:
+    def __init__(self, attachment_id, name, size=12, chunks=None):
+        self.id = attachment_id
+        self.name = name
+        self.size = size
+        self.content = f"/v2/issues/TEST-1/attachments/{attachment_id}/{name}"
+        self.chunks = chunks or [b"chunk1", b"chunk2"]
+
+    def as_dict(self):
+        return {"id": self.id, "name": self.name, "size": self.size}
+
+
+class FakeAttachments:
+    def __init__(self, items=None):
+        self._items = list(items or [FakeAttachment("att1", "a.txt")])
+        self.created = []
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __getitem__(self, key):
+        for attachment in self._items:
+            if str(attachment.id) == str(key):
+                return attachment
+        raise KeyError(key)
+
+    def read(self, attachment):
+        return iter(attachment.chunks)
+
+    def create(self, file, params=None):
+        self.created.append({"file": file, "params": params})
+        return {"id": "att-new", "name": (params or {}).get("filename") or file}
+
+
+class FakeQueue:
+    def __init__(self, key, versions=None, components=None):
+        self.key = key
+        self.versions = list(versions or [])
+        self.components = list(components or [])
+
+    def as_dict(self):
+        return {"key": self.key}
+
+
+class FakeQueues:
+    def __init__(self, queues):
+        self._queues = {queue.key: queue for queue in queues}
+
+    def __getitem__(self, key):
+        return self._queues[key]
+
+    def get_all(self):
+        return list(self._queues.values())
 
 
 class FakeSeekablePaginatedList:
@@ -76,10 +190,15 @@ class FakeComments:
 
 
 class FakeIssue:
-    def __init__(self, key, transitions=None):
+    def __init__(self, key, transitions=None, links=None):
         self.key = key
         self.comments = FakeComments()
         self.transitions = FakeTransitionCollection(transitions or [])
+        self.links = FakeLinks(links)
+        self.changelog = [{"id": "cl1"}]
+        self.worklog = FakeCreatableList([{"id": "wl1"}])
+        self.checklist_items = FakeCreatableList([{"id": "ci1"}])
+        self.attachments = FakeAttachments()
         self.updated = []
 
     def update(self, **kwargs):
@@ -91,9 +210,20 @@ class FakeIssue:
 
 
 class FakeSdkClient:
-    def __init__(self, issue, find_result=None):
+    def __init__(self, issue, find_result=None, queues=None):
         self.issue = issue
         self.issues = FakeCollection({issue.key: issue}, find_result=find_result)
+        self._connection = FakeConnection()
+        self.users = FakeDictCollection([{"id": "user1"}])
+        self.statuses = FakeDictCollection([{"key": "open"}])
+        self.issue_types = FakeDictCollection([{"key": "bug"}])
+        self.priorities = FakeDictCollection([{"key": "normal"}])
+        self.fields = FakeDictCollection([{"id": "summary"}])
+        self.linktypes = FakeDictCollection([{"id": "relates"}])
+        self.queues = FakeQueues(
+            queues
+            or [FakeQueue("TEST", versions=[{"id": "v1"}], components=[{"id": "c1"}])]
+        )
 
 
 class ClientTests(unittest.TestCase):
@@ -219,6 +349,164 @@ class ClientTests(unittest.TestCase):
         client.execute_transition("TEST-1", "close", {"resolution": "fixed"})
 
         self.assertEqual(close.executions, [{"resolution": "fixed"}])
+
+    def test_search_issues_include_total_adds_count(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        sdk_client.issues.count_result = 7
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.search_issues(query="Queue: TEST", per_page=5, page=2, include_total=True)
+
+        self.assertEqual(
+            result,
+            {"issues": [{"key": "TEST-1"}], "total": 7, "page": 2, "per_page": 5},
+        )
+        self.assertTrue(any(call.get("count_only") for call in sdk_client.issues.find_calls))
+
+    def test_link_issue_creates_link_via_sdk(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        client.link_issue("TEST-1", "relates", "TEST-2")
+
+        self.assertEqual(issue.links.created, [{"relationship": "relates", "issue": "TEST-2"}])
+
+    def test_list_links_returns_issue_links(self):
+        link = FakeLink("100", {"key": "TEST-2"})
+        issue = FakeIssue("TEST-1", links=[link])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(client.list_links("TEST-1"), [{"id": "100", "object": {"key": "TEST-2"}}])
+
+    def test_unlink_issue_deletes_matching_link(self):
+        issue = FakeIssue("TEST-1", links=[FakeLink("100", {"key": "TEST-2"})])
+        sdk_client = FakeSdkClient(issue)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.unlink_issue("TEST-1", "100")
+
+        self.assertEqual(sdk_client._connection.deleted, ["/v2/issues/links/100"])
+        self.assertEqual(result, {"deleted": "100", "issue": "TEST-1"})
+
+    def test_unlink_issue_unknown_id_raises(self):
+        issue = FakeIssue("TEST-1", links=[FakeLink("100", {})])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with self.assertRaises(ValueError):
+            client.unlink_issue("TEST-1", "999")
+
+    def test_reference_dictionaries_use_sdk_collections(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(client.list_queues(), [{"key": "TEST"}])
+        self.assertEqual(client.list_users(), [{"id": "user1"}])
+        self.assertEqual(client.list_statuses(), [{"key": "open"}])
+        self.assertEqual(client.list_issue_types(), [{"key": "bug"}])
+        self.assertEqual(client.list_priorities(), [{"key": "normal"}])
+        self.assertEqual(client.list_fields(), [{"id": "summary"}])
+        self.assertEqual(client.list_link_types(), [{"id": "relates"}])
+
+    def test_queue_versions_and_components(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(client.list_queue_versions("TEST"), [{"id": "v1"}])
+        self.assertEqual(client.list_queue_components("TEST"), [{"id": "c1"}])
+
+    def test_read_only_activity_collections(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(client.get_changelog("TEST-1"), [{"id": "cl1"}])
+        self.assertEqual(client.list_worklog("TEST-1"), [{"id": "wl1"}])
+        self.assertEqual(client.list_checklist("TEST-1"), [{"id": "ci1"}])
+        self.assertEqual(
+            client.list_attachments("TEST-1"),
+            [{"id": "att1", "name": "a.txt", "size": 12}],
+        )
+
+    def test_add_worklog_creates_record(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        client.add_worklog("TEST-1", "PT1H", comment="did work")
+
+        self.assertEqual(issue.worklog.created, [{"duration": "PT1H", "comment": "did work"}])
+
+    def test_add_checklist_item_creates_entry(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        client.add_checklist_item("TEST-1", "step 1", checked=True)
+
+        self.assertEqual(issue.checklist_items.created, [{"text": "step 1", "checked": True}])
+
+    def test_download_attachment_writes_bytes_to_dir(self):
+        import os
+        import tempfile
+
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = client.download_attachment("TEST-1", "att1", directory)
+
+            expected_path = os.path.join(directory, "a.txt")
+            self.assertEqual(result, {"path": expected_path, "name": "a.txt", "size": 12})
+            with open(expected_path, "rb") as handle:
+                self.assertEqual(handle.read(), b"chunk1chunk2")
+
+    def test_download_attachment_sanitizes_filename(self):
+        import os
+        import tempfile
+
+        issue = FakeIssue("TEST-1")
+        issue.attachments = FakeAttachments([FakeAttachment("att9", "../evil.txt")])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = client.download_attachment("TEST-1", "att9", directory)
+
+            self.assertEqual(os.path.dirname(result["path"]), directory)
+            self.assertEqual(result["name"], "evil.txt")
+
+    def test_upload_attachment_creates_via_sdk(self):
+        import os
+        import tempfile
+
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "up.txt")
+            with open(path, "wb") as handle:
+                handle.write(b"data")
+
+            client.upload_attachment("TEST-1", path, filename="renamed.txt")
+
+            self.assertEqual(
+                issue.attachments.created,
+                [{"file": path, "params": {"filename": "renamed.txt"}}],
+            )
+
+    def test_upload_attachment_missing_file_raises(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with self.assertRaises(ValueError):
+            client.upload_attachment("TEST-1", "/no/such/file.xyz")
+
+    def test_call_sdk_wraps_transport_errors_as_api_errors(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        def boom(_client):
+            raise ConnectionError("dns failure")
+
+        with self.assertRaises(TrackerApiError):
+            client._call_sdk(boom)
 
 
 if __name__ == "__main__":

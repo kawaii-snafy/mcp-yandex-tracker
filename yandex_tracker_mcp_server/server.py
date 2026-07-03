@@ -43,6 +43,11 @@ TOOLS: list[dict[str, Any]] = [
                 "keys": {"type": "array", "items": {"type": "string"}},
                 "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
                 "page": {"type": "integer", "minimum": 1},
+                "include_total": {
+                    "type": "boolean",
+                    "description": "Also return the total match count (extra request). "
+                    "Response becomes {issues, total, page, per_page}.",
+                },
             }
         ),
     },
@@ -127,6 +132,200 @@ TOOLS: list[dict[str, Any]] = [
             ["issue_key", "transition_id"],
         ),
     },
+    {
+        "name": "tracker_link_issues",
+        "description": "Create a link between two Yandex Tracker issues. "
+        "Use tracker_list_link_types to discover valid relationship values.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string", "description": "Source issue, e.g. TEST-1."},
+                "relationship": {
+                    "type": "string",
+                    "description": "Link type, e.g. relates, depends on, "
+                    "is dependent by, is subtask for, is parent task for, duplicates.",
+                },
+                "target_issue": {"type": "string", "description": "Issue to link to, e.g. TEST-2."},
+            },
+            ["issue_key", "relationship", "target_issue"],
+        ),
+    },
+    {
+        "name": "tracker_list_links",
+        "description": "List links of a Yandex Tracker issue (each carries an id for tracker_unlink_issues).",
+        "inputSchema": _schema(
+            {"issue_key": {"type": "string"}},
+            ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_unlink_issues",
+        "description": "Remove a link from a Yandex Tracker issue by its link id "
+        "(get ids from tracker_list_links).",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "link_id": {"type": "string", "description": "Link id from tracker_list_links."},
+            },
+            ["issue_key", "link_id"],
+        ),
+    },
+    {
+        "name": "tracker_list_queues",
+        "description": "List Yandex Tracker queues.",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_users",
+        "description": "List Yandex Tracker users (for assignee, followers, and other user fields).",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_statuses",
+        "description": "List the global Yandex Tracker status dictionary.",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_issue_types",
+        "description": "List the global Yandex Tracker issue-type dictionary.",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_priorities",
+        "description": "List the global Yandex Tracker priority dictionary.",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_fields",
+        "description": "List Yandex Tracker fields, including custom fields.",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_link_types",
+        "description": "List Yandex Tracker link types (valid relationship values for tracker_link_issues).",
+        "inputSchema": _schema({}),
+    },
+    {
+        "name": "tracker_list_queue_versions",
+        "description": "List versions defined in a specific Yandex Tracker queue.",
+        "inputSchema": _schema(
+            {"queue": {"type": "string", "description": "Queue key, e.g. TEST."}},
+            ["queue"],
+        ),
+    },
+    {
+        "name": "tracker_list_queue_components",
+        "description": "List components defined in a specific Yandex Tracker queue.",
+        "inputSchema": _schema(
+            {"queue": {"type": "string", "description": "Queue key, e.g. TEST."}},
+            ["queue"],
+        ),
+    },
+    {
+        "name": "tracker_get_changelog",
+        "description": "Get the change history of a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {"issue_key": {"type": "string"}},
+            ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_list_worklog",
+        "description": "List worklog (time-tracking) records of a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {"issue_key": {"type": "string"}},
+            ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_add_worklog",
+        "description": "Add a worklog (time spent) record to a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "duration": {
+                    "type": "string",
+                    "description": "ISO 8601 duration, e.g. PT1H30M for 1h30m.",
+                },
+                "comment": {"type": "string"},
+                "start": {
+                    "type": "string",
+                    "description": "ISO 8601 start datetime, e.g. 2026-07-03T10:00:00.000+0000.",
+                },
+            },
+            ["issue_key", "duration"],
+        ),
+    },
+    {
+        "name": "tracker_list_checklist",
+        "description": "List checklist items of a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {"issue_key": {"type": "string"}},
+            ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_add_checklist_item",
+        "description": "Add a checklist item to a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "text": {"type": "string"},
+                "checked": {"type": "boolean", "description": "Initial checked state."},
+            },
+            ["issue_key", "text"],
+        ),
+    },
+    {
+        "name": "tracker_list_attachments",
+        "description": "List attachment metadata (id, name, size, url) of a Yandex Tracker issue. "
+        "Use tracker_download_attachment to fetch the bytes.",
+        "inputSchema": _schema(
+            {"issue_key": {"type": "string"}},
+            ["issue_key"],
+        ),
+    },
+    {
+        "name": "tracker_download_attachment",
+        "description": "Download an issue attachment to a local directory and return the saved "
+        "file path. Tracker attachment URLs need authentication, so this proxies the download "
+        "through the server. Ask the user where to save before calling.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "attachment_id": {
+                    "type": "string",
+                    "description": "Attachment id from tracker_list_attachments.",
+                },
+                "dest_dir": {
+                    "type": "string",
+                    "description": "Absolute directory path to save the file into.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Optional override for the saved file name.",
+                },
+            },
+            ["issue_key", "attachment_id", "dest_dir"],
+        ),
+    },
+    {
+        "name": "tracker_upload_attachment",
+        "description": "Upload a local file as an attachment on a Yandex Tracker issue.",
+        "inputSchema": _schema(
+            {
+                "issue_key": {"type": "string"},
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the local file to upload.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Optional name to store the attachment under in Tracker.",
+                },
+            },
+            ["issue_key", "file_path"],
+        ),
+    },
 ]
 
 
@@ -193,8 +392,9 @@ class McpServer:
                 filter=a.get("filter"),
                 order=a.get("order"),
                 keys=a.get("keys"),
-                per_page=int(a.get("per_page", 20)),
-                page=int(a.get("page", 1)),
+                per_page=_int_arg(a, "per_page", 20),
+                page=_int_arg(a, "page", 1),
+                include_total=bool(a.get("include_total", False)),
             ),
             "tracker_create_issue": lambda c, a: c.create_issue(
                 queue=_required(a, "queue"),
@@ -222,6 +422,55 @@ class McpServer:
                 _required(a, "transition_id"),
                 a.get("fields"),
             ),
+            "tracker_link_issues": lambda c, a: c.link_issue(
+                _required(a, "issue_key"),
+                _required(a, "relationship"),
+                _required(a, "target_issue"),
+            ),
+            "tracker_list_links": lambda c, a: c.list_links(_required(a, "issue_key")),
+            "tracker_unlink_issues": lambda c, a: c.unlink_issue(
+                _required(a, "issue_key"),
+                _required(a, "link_id"),
+            ),
+            "tracker_list_queues": lambda c, a: c.list_queues(),
+            "tracker_list_users": lambda c, a: c.list_users(),
+            "tracker_list_statuses": lambda c, a: c.list_statuses(),
+            "tracker_list_issue_types": lambda c, a: c.list_issue_types(),
+            "tracker_list_priorities": lambda c, a: c.list_priorities(),
+            "tracker_list_fields": lambda c, a: c.list_fields(),
+            "tracker_list_link_types": lambda c, a: c.list_link_types(),
+            "tracker_list_queue_versions": lambda c, a: c.list_queue_versions(
+                _required(a, "queue")
+            ),
+            "tracker_list_queue_components": lambda c, a: c.list_queue_components(
+                _required(a, "queue")
+            ),
+            "tracker_get_changelog": lambda c, a: c.get_changelog(_required(a, "issue_key")),
+            "tracker_list_worklog": lambda c, a: c.list_worklog(_required(a, "issue_key")),
+            "tracker_add_worklog": lambda c, a: c.add_worklog(
+                _required(a, "issue_key"),
+                _required(a, "duration"),
+                comment=a.get("comment"),
+                start=a.get("start"),
+            ),
+            "tracker_list_checklist": lambda c, a: c.list_checklist(_required(a, "issue_key")),
+            "tracker_add_checklist_item": lambda c, a: c.add_checklist_item(
+                _required(a, "issue_key"),
+                _required(a, "text"),
+                checked=bool(a.get("checked", False)),
+            ),
+            "tracker_list_attachments": lambda c, a: c.list_attachments(_required(a, "issue_key")),
+            "tracker_download_attachment": lambda c, a: c.download_attachment(
+                _required(a, "issue_key"),
+                _required(a, "attachment_id"),
+                _required(a, "dest_dir"),
+                filename=a.get("filename"),
+            ),
+            "tracker_upload_attachment": lambda c, a: c.upload_attachment(
+                _required(a, "issue_key"),
+                _required(a, "file_path"),
+                filename=a.get("filename"),
+            ),
         }
         if name not in handlers:
             raise ValueError(f"Unknown tool: {name}")
@@ -239,6 +488,14 @@ def _required(arguments: dict[str, Any], name: str) -> Any:
     if value is None or value == "":
         raise ValueError(f"Missing required argument: {name}")
     return value
+
+
+def _int_arg(arguments: dict[str, Any], name: str, default: int) -> int:
+    value = arguments.get(name, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Argument {name!r} must be an integer, got {value!r}.")
 
 
 def _tool_result(payload: Any) -> dict[str, Any]:

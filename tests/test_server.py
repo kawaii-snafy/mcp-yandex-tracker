@@ -46,6 +46,86 @@ class FakeClient:
         self.calls.append(("execute_transition", issue_key, transition_id, fields))
         return {"transition": transition_id}
 
+    def link_issue(self, issue_key, relationship, target_issue):
+        self.calls.append(("link_issue", issue_key, relationship, target_issue))
+        return {"linked": target_issue}
+
+    def list_links(self, issue_key):
+        self.calls.append(("list_links", issue_key))
+        return [{"id": "100"}]
+
+    def unlink_issue(self, issue_key, link_id):
+        self.calls.append(("unlink_issue", issue_key, link_id))
+        return {"deleted": link_id}
+
+    def list_queues(self):
+        self.calls.append(("list_queues",))
+        return [{"key": "TEST"}]
+
+    def list_users(self):
+        self.calls.append(("list_users",))
+        return [{"id": "user1"}]
+
+    def list_statuses(self):
+        self.calls.append(("list_statuses",))
+        return [{"key": "open"}]
+
+    def list_issue_types(self):
+        self.calls.append(("list_issue_types",))
+        return [{"key": "bug"}]
+
+    def list_priorities(self):
+        self.calls.append(("list_priorities",))
+        return [{"key": "normal"}]
+
+    def list_fields(self):
+        self.calls.append(("list_fields",))
+        return [{"id": "summary"}]
+
+    def list_link_types(self):
+        self.calls.append(("list_link_types",))
+        return [{"id": "relates"}]
+
+    def list_queue_versions(self, queue):
+        self.calls.append(("list_queue_versions", queue))
+        return [{"id": "v1"}]
+
+    def list_queue_components(self, queue):
+        self.calls.append(("list_queue_components", queue))
+        return [{"id": "c1"}]
+
+    def get_changelog(self, issue_key):
+        self.calls.append(("get_changelog", issue_key))
+        return [{"id": "cl1"}]
+
+    def list_worklog(self, issue_key):
+        self.calls.append(("list_worklog", issue_key))
+        return [{"id": "wl1"}]
+
+    def add_worklog(self, issue_key, duration, comment=None, start=None):
+        self.calls.append(("add_worklog", issue_key, duration, comment, start))
+        return {"id": "wl", "duration": duration}
+
+    def list_checklist(self, issue_key):
+        self.calls.append(("list_checklist", issue_key))
+        return [{"id": "ci1"}]
+
+    def add_checklist_item(self, issue_key, text, checked=False):
+        self.calls.append(("add_checklist_item", issue_key, text, checked))
+        return {"id": "ci", "text": text}
+
+    def list_attachments(self, issue_key):
+        self.calls.append(("list_attachments", issue_key))
+        return [{"id": "att1"}]
+
+    def download_attachment(self, issue_key, attachment_id, dest_dir, filename=None):
+        self.calls.append(("download_attachment", issue_key, attachment_id, dest_dir, filename))
+        return {"path": f"{dest_dir}/a.txt"}
+
+    def upload_attachment(self, issue_key, file_path, filename=None):
+        self.calls.append(("upload_attachment", issue_key, file_path, filename))
+        return {"id": "att-new"}
+
 
 class ServerTests(unittest.TestCase):
     def test_initialize_declares_tools_capability(self):
@@ -70,6 +150,189 @@ class ServerTests(unittest.TestCase):
         self.assertIn("tracker_add_comment", names)
         self.assertIn("tracker_list_transitions", names)
         self.assertIn("tracker_move_issue_status", names)
+
+    def test_tools_list_exposes_link_and_dictionary_tools(self):
+        server = McpServer(client_factory=FakeClient)
+
+        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+        names = {tool["name"] for tool in response["result"]["tools"]}
+        for name in (
+            "tracker_link_issues",
+            "tracker_list_links",
+            "tracker_unlink_issues",
+            "tracker_list_queues",
+            "tracker_list_users",
+            "tracker_list_link_types",
+            "tracker_list_queue_versions",
+            "tracker_list_queue_components",
+        ):
+            self.assertIn(name, names)
+
+    def test_tools_list_exposes_activity_tools(self):
+        server = McpServer(client_factory=FakeClient)
+
+        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+        names = {tool["name"] for tool in response["result"]["tools"]}
+        for name in (
+            "tracker_get_changelog",
+            "tracker_list_worklog",
+            "tracker_add_worklog",
+            "tracker_list_checklist",
+            "tracker_add_checklist_item",
+            "tracker_list_attachments",
+            "tracker_download_attachment",
+            "tracker_upload_attachment",
+        ):
+            self.assertIn(name, names)
+
+    def test_upload_attachment_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_upload_attachment",
+                    "arguments": {"issue_key": "TEST-1", "file_path": "/tmp/up.txt"},
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(
+            fake.calls,
+            [("upload_attachment", "TEST-1", "/tmp/up.txt", None)],
+        )
+
+    def test_download_attachment_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_download_attachment",
+                    "arguments": {
+                        "issue_key": "TEST-1",
+                        "attachment_id": "att1",
+                        "dest_dir": "/tmp/dl",
+                    },
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(
+            fake.calls,
+            [("download_attachment", "TEST-1", "att1", "/tmp/dl", None)],
+        )
+
+    def test_search_invalid_per_page_is_tool_error(self):
+        server = McpServer(client_factory=FakeClient)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_search_issues",
+                    "arguments": {"query": "Queue: TEST", "per_page": "abc"},
+                },
+            }
+        )
+
+        self.assertNotIn("error", response)
+        self.assertTrue(response["result"]["isError"])
+        self.assertIn("must be an integer", response["result"]["content"][0]["text"])
+
+    def test_add_worklog_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_add_worklog",
+                    "arguments": {"issue_key": "TEST-1", "duration": "PT1H", "comment": "x"},
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(fake.calls, [("add_worklog", "TEST-1", "PT1H", "x", None)])
+
+    def test_link_issues_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_link_issues",
+                    "arguments": {
+                        "issue_key": "TEST-1",
+                        "relationship": "relates",
+                        "target_issue": "TEST-2",
+                    },
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(fake.calls, [("link_issue", "TEST-1", "relates", "TEST-2")])
+
+    def test_unlink_issues_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_unlink_issues",
+                    "arguments": {"issue_key": "TEST-1", "link_id": "100"},
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(fake.calls, [("unlink_issue", "TEST-1", "100")])
+
+    def test_list_queue_versions_routes_to_client(self):
+        fake = FakeClient()
+        server = McpServer(client_factory=lambda: fake)
+
+        response = server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "tracker_list_queue_versions",
+                    "arguments": {"queue": "TEST"},
+                },
+            }
+        )
+
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(fake.calls, [("list_queue_versions", "TEST")])
 
     def test_tools_call_returns_text_result(self):
         fake = FakeClient()

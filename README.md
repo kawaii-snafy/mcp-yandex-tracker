@@ -1,7 +1,9 @@
 # Yandex Tracker MCP
 
 Small stdio MCP server for Yandex Tracker. It exposes tools for reading,
-searching, creating, updating, commenting on, and transitioning Tracker issues.
+searching, creating, updating, commenting on, transitioning, and linking Tracker
+issues, plus read-only reference lookups (queues, users, statuses, types,
+priorities, fields, versions, components).
 
 ## Usage with Codex
 

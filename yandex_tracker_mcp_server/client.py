@@ -74,6 +74,7 @@ class YandexTrackerClient:
         keys: list[str] | None = None,
         per_page: int = 20,
         page: int = 1,
+        include_total: bool = False,
     ) -> Any:
         def search(client: Any) -> Any:
             issues = client.issues.find(
@@ -84,7 +85,21 @@ class YandexTrackerClient:
                 per_page=per_page,
                 page=page,
             )
-            return list(issues)
+            materialized = list(issues)
+            if not include_total:
+                return materialized
+            total = client.issues.find(
+                query=query,
+                filter=filter,
+                keys=keys,
+                count_only=True,
+            )
+            return {
+                "issues": materialized,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+            }
 
         return _to_plain(self._call_sdk(search))
 
@@ -156,6 +171,159 @@ class YandexTrackerClient:
 
         return _to_plain(self._call_sdk(execute))
 
+    def link_issue(
+        self,
+        issue_key: str,
+        relationship: str,
+        target_issue: str,
+    ) -> Any:
+        def link(client: Any) -> Any:
+            issue = client.issues[issue_key]
+            return issue.links.create(relationship=relationship, issue=target_issue)
+
+        return _to_plain(self._call_sdk(link))
+
+    def list_links(self, issue_key: str) -> Any:
+        def get_all(client: Any) -> Any:
+            issue = client.issues[issue_key]
+            return list(issue.links)
+
+        return _to_plain(self._call_sdk(get_all))
+
+    def unlink_issue(self, issue_key: str, link_id: str) -> Any:
+        def unlink(client: Any) -> Any:
+            issue = client.issues[issue_key]
+            target = str(link_id)
+            for link in issue.links:
+                if str(_field(link, "id")) == target:
+                    client._connection.delete(path=link._path)
+                    return {"deleted": target, "issue": issue_key}
+            raise ValueError(f"No link {link_id!r} on issue {issue_key}.")
+
+        return _to_plain(self._call_sdk(unlink))
+
+    def list_queues(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.queues.get_all())))
+
+    def list_users(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.users.get_all())))
+
+    def list_statuses(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.statuses.get_all())))
+
+    def list_issue_types(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.issue_types.get_all())))
+
+    def list_priorities(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.priorities.get_all())))
+
+    def list_fields(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.fields.get_all())))
+
+    def list_link_types(self) -> Any:
+        return _to_plain(self._call_sdk(lambda client: list(client.linktypes.get_all())))
+
+    def list_queue_versions(self, queue: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.queues[queue].versions))
+        )
+
+    def list_queue_components(self, queue: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.queues[queue].components))
+        )
+
+    def get_changelog(self, issue_key: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.issues[issue_key].changelog))
+        )
+
+    def list_worklog(self, issue_key: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.issues[issue_key].worklog))
+        )
+
+    def add_worklog(
+        self,
+        issue_key: str,
+        duration: str,
+        comment: str | None = None,
+        start: str | None = None,
+    ) -> Any:
+        def add(client: Any) -> Any:
+            issue = client.issues[issue_key]
+            payload: dict[str, Any] = {"duration": duration}
+            if comment is not None:
+                payload["comment"] = comment
+            if start is not None:
+                payload["start"] = start
+            return issue.worklog.create(**payload)
+
+        return _to_plain(self._call_sdk(add))
+
+    def list_checklist(self, issue_key: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.issues[issue_key].checklist_items))
+        )
+
+    def add_checklist_item(self, issue_key: str, text: str, checked: bool = False) -> Any:
+        def add(client: Any) -> Any:
+            issue = client.issues[issue_key]
+            return issue.checklist_items.create(text=text, checked=checked)
+
+        return _to_plain(self._call_sdk(add))
+
+    def list_attachments(self, issue_key: str) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: list(client.issues[issue_key].attachments))
+        )
+
+    def download_attachment(
+        self,
+        issue_key: str,
+        attachment_id: str,
+        dest_dir: str,
+        filename: str | None = None,
+    ) -> Any:
+        def download(client: Any) -> Any:
+            attachments = client.issues[issue_key].attachments
+            attachment = attachments[attachment_id]
+            raw_name = filename or _field(attachment, "name") or str(attachment_id)
+            # basename guards against path traversal via the attachment name.
+            name = os.path.basename(str(raw_name)) or str(attachment_id)
+            os.makedirs(dest_dir, exist_ok=True)
+            dest_path = os.path.join(dest_dir, name)
+            with open(dest_path, "wb") as handle:
+                for chunk in attachments.read(attachment):
+                    handle.write(chunk)
+            return {
+                "path": dest_path,
+                "name": name,
+                "size": _field(attachment, "size"),
+            }
+
+        return _to_plain(self._call_sdk(download))
+
+    def upload_attachment(
+        self,
+        issue_key: str,
+        file_path: str,
+        filename: str | None = None,
+    ) -> Any:
+        # Validate the local file up front so a missing/unreadable path is a clean
+        # tool error rather than being mislabeled as a transport failure.
+        if not os.path.isfile(file_path):
+            raise ValueError(f"File not found: {file_path}")
+        if not os.access(file_path, os.R_OK):
+            raise ValueError(f"File is not readable: {file_path}")
+
+        def upload(client: Any) -> Any:
+            attachments = client.issues[issue_key].attachments
+            params = {"filename": filename} if filename else None
+            return attachments.create(file_path, params=params)
+
+        return _to_plain(self._call_sdk(upload))
+
     @staticmethod
     def _build_tracker_client(
         config: TrackerConfig | None,
@@ -172,10 +340,22 @@ class YandexTrackerClient:
         except ValueError:
             raise
         except Exception as exc:
-            if exc.__class__.__module__.startswith("yandex_tracker_client"):
+            module = exc.__class__.__module__
+            if module.startswith("yandex_tracker_client"):
                 status = getattr(exc, "status_code", getattr(exc, "status", 0)) or 0
                 payload = getattr(exc, "payload", None)
                 raise TrackerApiError(status, str(exc), payload) from exc
+            # Direct transport failures (requests/urllib3/socket) not wrapped by
+            # the SDK: surface them as Tracker API errors so callers get a clean
+            # tool error instead of an opaque internal error.
+            if isinstance(exc, OSError) or module.split(".", 1)[0] in {
+                "requests",
+                "urllib3",
+                "http",
+                "socket",
+                "ssl",
+            }:
+                raise TrackerApiError(0, f"Failed to reach Yandex Tracker: {exc}") from exc
             raise
 
     @staticmethod
