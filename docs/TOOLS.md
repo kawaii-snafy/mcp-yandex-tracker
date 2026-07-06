@@ -33,13 +33,22 @@ Search via query language, a filter object, or explicit keys.
 | `filter`   | object          |     |         | Field filter, e.g. `{"queue":"TEST"}`. |
 | `order`    | string          |     |         | Sort expression.                   |
 | `keys`     | array\<string\> |     |         | Fetch specific issue keys.         |
-| `per_page` | integer 1–100   |     | `20`    | Page size.                         |
+| `per_page` | integer 1–100   |     | `20`    | Hard cap on issues returned (not just page size). |
 | `page`     | integer ≥ 1     |     | `1`     | Page number.                       |
 | `include_total` | boolean    |     | `false` | Also return the total match count (extra `_count` request). |
+| `full`     | boolean         |     | `false` | Return complete issue objects instead of the compact projection. |
 
-By default returns a materialized list (the SDK's lazy paginated result is
-exhausted into an array). At least one of `query` / `filter` / `keys` is normally
-needed for a meaningful search.
+By default returns a materialized list capped at `per_page`. The SDK result is
+cursor-paginated, so iterating it to exhaustion would follow every "next" page;
+`per_page` is enforced as a real limit (later pages are never fetched). At least
+one of `query` / `filter` / `keys` is normally needed for a meaningful search.
+
+Each issue is returned as a **compact projection** — `key`, `summary`, `status`,
+`type`, `priority`, `assignee`, `queue`, `parent`, `epic`, `sprint`, `tags`,
+`updatedAt`, `createdAt` — with nested references trimmed to their identifying
+keys. This keeps a page of results small (a full 100-issue page can be hundreds
+of KB). Pass `full: true` for the complete issue objects, or use
+`tracker_get_issue` for one issue's full detail.
 
 When `include_total` is `true`, the response shape changes to an object so the
 caller can tell whether more pages exist:

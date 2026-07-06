@@ -75,6 +75,7 @@ class YandexTrackerClient:
         per_page: int = 20,
         page: int = 1,
         include_total: bool = False,
+        full: bool = False,
     ) -> Any:
         def search(client: Any) -> Any:
             issues = client.issues.find(
@@ -85,7 +86,10 @@ class YandexTrackerClient:
                 per_page=per_page,
                 page=page,
             )
-            materialized = list(issues)
+            # per_page is only the API page size; iterating the SDK result to
+            # exhaustion follows every "next" page. Cap at per_page so it is a
+            # real limit on returned issues (and HTTP round-trips), not a floor.
+            materialized = _take(issues, per_page)
             if not include_total:
                 return materialized
             total = client.issues.find(
@@ -101,7 +105,20 @@ class YandexTrackerClient:
                 "per_page": per_page,
             }
 
-        return _to_plain(self._call_sdk(search))
+        result = _to_plain(self._call_sdk(search))
+        if full:
+            return result
+        # Default to a compact projection: full issue objects carry ~29 fields
+        # each (description, nested user refs, boards, sprint...), so a page of
+        # results can be hundreds of KB. Callers pass full=true for everything.
+        if isinstance(result, dict):
+            issues = result.get("issues")
+            if isinstance(issues, list):
+                result["issues"] = [_slim_issue(item) for item in issues]
+            return result
+        if isinstance(result, list):
+            return [_slim_issue(item) for item in result]
+        return result
 
     def create_issue(
         self,
@@ -524,6 +541,57 @@ def _field(value: Any, name: str) -> Any:
         return value[name]
     except (KeyError, TypeError):
         return getattr(value, name, None)
+
+
+def _take(iterable: Any, limit: int) -> list[Any]:
+    # Stop iterating a (lazily cursor-paginated) SDK result once `limit` items
+    # are collected, so later pages are never fetched.
+    items: list[Any] = []
+    if limit <= 0:
+        return items
+    for item in iterable:
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return items
+
+
+_SLIM_REF_KEYS = ("key", "id", "display", "name")
+_SLIM_ISSUE_FIELDS = (
+    "key",
+    "summary",
+    "status",
+    "type",
+    "priority",
+    "assignee",
+    "queue",
+    "parent",
+    "epic",
+    "sprint",
+    "tags",
+    "updatedAt",
+    "createdAt",
+)
+
+
+def _slim_ref(value: Any) -> Any:
+    # Collapse a nested Tracker reference (user, status, queue...) to just its
+    # identifying keys, dropping self URLs and other bulk.
+    if isinstance(value, dict):
+        return {key: value[key] for key in _SLIM_REF_KEYS if key in value}
+    if isinstance(value, list):
+        return [_slim_ref(item) for item in value]
+    return value
+
+
+def _slim_issue(issue: Any) -> Any:
+    if not isinstance(issue, dict):
+        return issue
+    slim: dict[str, Any] = {}
+    for field in _SLIM_ISSUE_FIELDS:
+        if field in issue:
+            slim[field] = _slim_ref(issue[field])
+    return slim
 
 
 def _to_plain(value: Any) -> Any:

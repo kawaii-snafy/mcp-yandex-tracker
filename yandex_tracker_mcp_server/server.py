@@ -34,19 +34,33 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "tracker_search_issues",
-        "description": "Search Yandex Tracker issues using query language, filter fields, or keys.",
+        "description": "Search Yandex Tracker issues using query language, filter fields, or keys. "
+        "Returns a compact projection of each issue (key, summary, status, type, priority, "
+        "assignee, queue, parent, epic, sprint, tags, timestamps) — pass full=true for the "
+        "complete issue objects. per_page is a hard cap on how many issues are returned.",
         "inputSchema": _schema(
             {
                 "query": {"type": "string"},
                 "filter": {"type": "object"},
                 "order": {"type": "string"},
                 "keys": {"type": "array", "items": {"type": "string"}},
-                "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+                "per_page": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Max issues to return (hard cap, not just page size). "
+                    "Default 20.",
+                },
                 "page": {"type": "integer", "minimum": 1},
                 "include_total": {
                     "type": "boolean",
                     "description": "Also return the total match count (extra request). "
                     "Response becomes {issues, total, page, per_page}.",
+                },
+                "full": {
+                    "type": "boolean",
+                    "description": "Return complete issue objects instead of the compact "
+                    "projection. Off by default to keep responses small.",
                 },
             }
         ),
@@ -487,6 +501,7 @@ class McpServer:
                 per_page=_int_arg(a, "per_page", 20),
                 page=_int_arg(a, "page", 1),
                 include_total=bool(a.get("include_total", False)),
+                full=bool(a.get("full", False)),
             ),
             "tracker_create_issue": lambda c, a: c.create_issue(
                 queue=_required(a, "queue"),

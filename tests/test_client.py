@@ -410,6 +410,79 @@ class ClientTests(unittest.TestCase):
         )
         self.assertTrue(any(call.get("count_only") for call in sdk_client.issues.find_calls))
 
+    def test_search_issues_caps_results_at_per_page(self):
+        issue = FakeIssue("TEST-1")
+        many = [{"key": f"TEST-{n}"} for n in range(10)]
+        sdk_client = FakeSdkClient(issue, find_result=many)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.search_issues(per_page=3)
+
+        # per_page is a hard cap even though find() yields 10 issues.
+        self.assertEqual(result, [{"key": "TEST-0"}, {"key": "TEST-1"}, {"key": "TEST-2"}])
+
+    def test_search_issues_stops_iterating_after_per_page(self):
+        issue = FakeIssue("TEST-1")
+        consumed = []
+
+        def counting_pages():
+            for n in range(10):
+                consumed.append(n)
+                yield {"key": f"TEST-{n}"}
+
+        sdk_client = FakeSdkClient(issue, find_result=counting_pages())
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        client.search_issues(per_page=2)
+
+        # Iteration halts at the cap, so later (paginated) items are never pulled.
+        self.assertEqual(consumed, [0, 1])
+
+    def test_search_issues_returns_compact_projection_by_default(self):
+        issue = FakeIssue("TEST-1")
+        full_issue = {
+            "key": "TEST-9",
+            "summary": "Do the thing",
+            "description": "a very long body " * 100,
+            "status": {"self": "https://api/…", "id": "1", "key": "open", "display": "Открыт"},
+            "assignee": {"self": "https://api/…", "id": "42", "display": "J. Smith"},
+            "followers": [{"id": "7"}, {"id": "8"}],
+            "boards": [{"id": "b1", "name": "Board"}],
+            "epic": {"self": "https://api/…", "id": "100", "key": "TEST-1", "display": "Epic"},
+        }
+        sdk_client = FakeSdkClient(issue, find_result=[full_issue])
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.search_issues(per_page=5)
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "key": "TEST-9",
+                    "summary": "Do the thing",
+                    "status": {"id": "1", "key": "open", "display": "Открыт"},
+                    "assignee": {"id": "42", "display": "J. Smith"},
+                    "epic": {"id": "100", "key": "TEST-1", "display": "Epic"},
+                }
+            ],
+        )
+
+    def test_search_issues_full_returns_complete_objects(self):
+        issue = FakeIssue("TEST-1")
+        full_issue = {
+            "key": "TEST-9",
+            "summary": "Do the thing",
+            "description": "body",
+            "status": {"self": "https://api/…", "id": "1", "key": "open"},
+        }
+        sdk_client = FakeSdkClient(issue, find_result=[full_issue])
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.search_issues(per_page=5, full=True)
+
+        self.assertEqual(result, [full_issue])
+
     def test_link_issue_creates_link_via_sdk(self):
         issue = FakeIssue("TEST-1")
         client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
