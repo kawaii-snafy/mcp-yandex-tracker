@@ -595,6 +595,30 @@ class ServerTests(unittest.TestCase):
         inner = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(inner["text"], text)
 
+    def test_stdio_malformed_bytes_do_not_crash_read_loop(self):
+        # A malformed byte on the UTF-8 transport must not raise
+        # UnicodeDecodeError out of the read loop and kill the server; it should
+        # decode leniently (U+FFFD), fail JSON parsing, and come back as a
+        # per-line JSON-RPC error while the server keeps serving.
+        valid = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+        ).encode("utf-8")
+        request = b"\xff\xfe\n" + valid
+
+        input_stream = io.TextIOWrapper(io.BytesIO(request), encoding="cp1251", newline="")
+        out_bytes = io.BytesIO()
+        output_stream = io.TextIOWrapper(out_bytes, encoding="cp1251", newline="")
+
+        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
+        output_stream.flush()
+
+        lines = out_bytes.getvalue().decode("utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        # First line: parse error for the malformed input.
+        self.assertIn("error", json.loads(lines[0]))
+        # Second line: the valid request that followed still gets a response.
+        self.assertEqual(json.loads(lines[1])["id"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
