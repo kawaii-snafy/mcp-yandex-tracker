@@ -561,6 +561,64 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(output_stream.getvalue(), "")
 
+    def test_stdio_preserves_cyrillic_over_non_utf8_locale_streams(self):
+        # Regression: on Windows, sys.stdin/sys.stdout default to the locale
+        # code page (e.g. cp1251). The MCP transport is UTF-8, so a Cyrillic
+        # payload must survive even when the stream objects were created with a
+        # non-UTF-8 encoding. serve_stdio pins them to UTF-8.
+        text = "клик по лого → сброс дашборда «на главную»"
+        request = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "tracker_add_comment",
+                        "arguments": {"issue_key": "TEST-1", "text": text},
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+
+        input_stream = io.TextIOWrapper(io.BytesIO(request), encoding="cp1251", newline="")
+        out_bytes = io.BytesIO()
+        output_stream = io.TextIOWrapper(out_bytes, encoding="cp1251", newline="")
+
+        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
+        output_stream.flush()
+
+        # Wire bytes must be valid UTF-8 and preserve the original text.
+        response = json.loads(out_bytes.getvalue().decode("utf-8"))
+        inner = json.loads(response["result"]["content"][0]["text"])
+        self.assertEqual(inner["text"], text)
+
+    def test_stdio_malformed_bytes_do_not_crash_read_loop(self):
+        # A malformed byte on the UTF-8 transport must not raise
+        # UnicodeDecodeError out of the read loop and kill the server; it should
+        # decode leniently (U+FFFD), fail JSON parsing, and come back as a
+        # per-line JSON-RPC error while the server keeps serving.
+        valid = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+        ).encode("utf-8")
+        request = b"\xff\xfe\n" + valid
+
+        input_stream = io.TextIOWrapper(io.BytesIO(request), encoding="cp1251", newline="")
+        out_bytes = io.BytesIO()
+        output_stream = io.TextIOWrapper(out_bytes, encoding="cp1251", newline="")
+
+        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
+        output_stream.flush()
+
+        lines = out_bytes.getvalue().decode("utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        # First line: parse error for the malformed input.
+        self.assertIn("error", json.loads(lines[0]))
+        # Second line: the valid request that followed still gets a response.
+        self.assertEqual(json.loads(lines[1])["id"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

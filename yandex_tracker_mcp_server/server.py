@@ -666,11 +666,42 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     }
 
 
+def _force_utf8(stream: Any, *, errors: str = "strict") -> Any:
+    # MCP stdio framing is newline-delimited UTF-8 JSON-RPC. On Windows
+    # sys.stdin/sys.stdout default to the locale code page (e.g. cp1251 on
+    # Russian Windows), which silently mangles non-ASCII payloads: incoming
+    # UTF-8 Cyrillic bytes get decoded as cp1251, and that already-corrupted
+    # text is what reaches Tracker (json.dumps ships it verbatim). The reverse
+    # encode on the way out cancels the damage for read-backs, hiding the bug
+    # from list-style tools while writes land corrupted.
+    #
+    # Pin the real stdio streams to UTF-8 and force newline="" so the framing
+    # "\n" is never rewritten to "\r\n" by Windows text-mode stdout. Callers
+    # that pass an in-memory io.StringIO (most unit tests) have no reconfigure()
+    # and are left untouched; the reconfigure path is exercised by the
+    # TextIOWrapper-backed regression tests.
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return stream
+    try:
+        reconfigure(encoding="utf-8", errors=errors, newline="")
+    except (ValueError, OSError):
+        pass
+    return stream
+
+
 def serve_stdio(
     input_stream: Any = sys.stdin,
     output_stream: Any = sys.stdout,
     server: McpServer | None = None,
 ) -> None:
+    # Decode input leniently: a malformed byte on the UTF-8 transport becomes
+    # U+FFFD and fails JSON parsing (reported as a per-line JSON-RPC error)
+    # instead of raising UnicodeDecodeError out of the read loop below and
+    # killing the whole server. Output stays strict — our own payloads are
+    # always valid Unicode.
+    input_stream = _force_utf8(input_stream, errors="replace")
+    output_stream = _force_utf8(output_stream)
     server = server or McpServer()
     for line in input_stream:
         line = line.strip()
