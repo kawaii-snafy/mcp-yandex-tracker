@@ -9,7 +9,6 @@ The whole server is a single top-level module:
 
 ```
 mcp_yandex_tracker.py   # everything: SDK client layer + FastMCP tools + main()
-run_server.py           # thin `from mcp_yandex_tracker import main` launcher
 tests/                  # unittest suite over fakes (no network)
 ```
 
@@ -24,7 +23,7 @@ Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
 
 - console script `mcp-yandex-tracker` (declared in `pyproject.toml`)
 - `python -m mcp_yandex_tracker`
-- `python run_server.py`
+- `python mcp_yandex_tracker.py`
 
 ## Protocol layer: the official MCP SDK
 

@@ -75,7 +75,7 @@ Point the host at the console script `mcp-yandex-tracker` (installed by the
 package), or run it explicitly:
 
 - `python -m mcp_yandex_tracker`
-- `python run_server.py`
+- `python mcp_yandex_tracker.py`
 
 ## Resources (@-mentions)
 

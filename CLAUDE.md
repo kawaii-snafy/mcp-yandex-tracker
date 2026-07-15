@@ -24,7 +24,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e .
 # Run the server (any of these; all call main() -> mcp.run("stdio"))
 .venv/bin/mcp-yandex-tracker
 .venv/bin/python -m mcp_yandex_tracker
-.venv/bin/python run_server.py
+.venv/bin/python mcp_yandex_tracker.py
 ```
 
 Always run the tests after changing behavior. There is no separate lint step.
