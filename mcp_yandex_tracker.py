@@ -661,13 +661,14 @@ def _dump(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Register a Yandex Tracker tool.
+# Domain exceptions a handler may raise; both surfaces remap them to a clean
+# MCP error instead of leaking an internal error.
+_DOMAIN_ERRORS = (TrackerApiError, TrackerConfigError, ValueError)
 
-    Wraps the handler so its raw return value is serialized to a single compact
-    JSON text block (structured_output=False keeps FastMCP from also emitting a
-    duplicating structuredContent block and an output schema), and domain
-    errors surface as clean isError tool results instead of internal errors.
+
+def _json_safe(fn: Callable[..., Any], error_cls: type[Exception]) -> Callable[..., Any]:
+    """Serialize a handler's return value to compact JSON and map domain errors.
+
     functools.wraps preserves the handler signature so FastMCP still derives the
     input schema from its typed parameters.
     """
@@ -676,10 +677,21 @@ def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(*args: Any, **kwargs: Any) -> str:
         try:
             return _dump(fn(*args, **kwargs))
-        except (TrackerApiError, TrackerConfigError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+        except _DOMAIN_ERRORS as exc:
+            raise error_cls(str(exc)) from exc
 
-    return mcp.tool(structured_output=False)(wrapper)
+    return wrapper
+
+
+def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Register a Yandex Tracker tool.
+
+    The handler's raw return value becomes a single compact JSON text block
+    (structured_output=False keeps FastMCP from also emitting a duplicating
+    structuredContent block and an output schema), and domain errors surface as
+    clean isError tool results instead of internal errors.
+    """
+    return mcp.tool(structured_output=False)(_json_safe(fn, ToolError))
 
 
 # --- Issues -----------------------------------------------------------------
@@ -1040,63 +1052,56 @@ def tracker_delete_attachment(
 # attached as context), not something the agent reads autonomously mid-task —
 # the tools above stay the agent's path to the same data. These add a natural
 # way to drop an issue snapshot or a reference dictionary into the conversation.
-def resource(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Serialize a resource body to compact JSON and map domain errors."""
+def resource(uri: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register a read-only Tracker resource.
 
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> str:
-        try:
-            return _dump(fn(*args, **kwargs))
-        except (TrackerApiError, TrackerConfigError, ValueError) as exc:
-            raise ResourceError(str(exc)) from exc
+    Symmetric with `tool`: the body's return value becomes a compact JSON
+    resource and domain errors surface as `ResourceError`.
+    """
 
-    return wrapper
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        return mcp.resource(uri, **kwargs)(_json_safe(fn, ResourceError))
+
+    return decorator
 
 
-@mcp.resource("tracker://issue/{key}", mime_type="application/json")
-@resource
+@resource("tracker://issue/{key}", mime_type="application/json")
 def issue_resource(key: str) -> Any:
     """A single Yandex Tracker issue by key (e.g. tracker://issue/TEST-123)."""
     return get_client().get_issue(key)
 
 
-@mcp.resource("tracker://queues", mime_type="application/json")
-@resource
+@resource("tracker://queues", mime_type="application/json")
 def queues_resource() -> Any:
     """The Yandex Tracker queue list."""
     return get_client().list_queues()
 
 
-@mcp.resource("tracker://statuses", mime_type="application/json")
-@resource
+@resource("tracker://statuses", mime_type="application/json")
 def statuses_resource() -> Any:
     """The global Yandex Tracker status dictionary."""
     return get_client().list_statuses()
 
 
-@mcp.resource("tracker://priorities", mime_type="application/json")
-@resource
+@resource("tracker://priorities", mime_type="application/json")
 def priorities_resource() -> Any:
     """The global Yandex Tracker priority dictionary."""
     return get_client().list_priorities()
 
 
-@mcp.resource("tracker://issue-types", mime_type="application/json")
-@resource
+@resource("tracker://issue-types", mime_type="application/json")
 def issue_types_resource() -> Any:
     """The global Yandex Tracker issue-type dictionary."""
     return get_client().list_issue_types()
 
 
-@mcp.resource("tracker://fields", mime_type="application/json")
-@resource
+@resource("tracker://fields", mime_type="application/json")
 def fields_resource() -> Any:
     """Yandex Tracker fields, including custom fields."""
     return get_client().list_fields()
 
 
-@mcp.resource("tracker://link-types", mime_type="application/json")
-@resource
+@resource("tracker://link-types", mime_type="application/json")
 def link_types_resource() -> Any:
     """Yandex Tracker link types (valid relationship values for links)."""
     return get_client().list_link_types()

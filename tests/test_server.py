@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 
 import mcp_yandex_tracker as server
 from mcp_yandex_tracker import TrackerApiError, TrackerConfigError, YandexTrackerClient
@@ -341,6 +341,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         contents = list(await server.mcp.read_resource("tracker://statuses"))
         self.assertEqual(json.loads(contents[0].content), [{"key": "open"}])
         self.assertEqual(self.fake.calls, [("list_statuses",)])
+
+    async def test_resource_error_surfaces_message(self):
+        # The resource wrapper maps a domain error to ResourceError, so the read
+        # carries a clean message instead of leaking the raw internal error.
+        class Boom:
+            def list_statuses(self):
+                raise TrackerApiError(500, "boom")
+
+        _use_client(Boom())
+        with self.assertRaises(ResourceError) as ctx:
+            await server.mcp.read_resource("tracker://statuses")
+        self.assertIn("boom", str(ctx.exception))
 
     # --- Errors ------------------------------------------------------------
     async def test_missing_required_argument_is_tool_error(self):
