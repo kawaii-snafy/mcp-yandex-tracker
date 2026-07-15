@@ -67,6 +67,21 @@ handler uses. It does two jobs:
 - `_client_factory` (defaults to `YandexTrackerClient`) stays swappable so tests
   inject a fake by setting `server._client = None; server._client_factory = …`.
 
+### Resources
+
+Alongside the tools, a handful of `@mcp.resource(...)` functions expose
+read-only context under the `tracker://` scheme: one template,
+`tracker://issue/{key}`, plus static reference dictionaries
+(`tracker://statuses`, `priorities`, `issue-types`, `fields`, `link-types`,
+`queues`). They go through the same `get_client()` and serialize to compact
+JSON (`application/json`) via the local `resource` wrapper, which maps domain
+errors to `ResourceError`.
+
+Resources are a **user**-facing surface: in Claude Code the user `@`-mentions
+one (e.g. `@yandex-tracker:tracker://issue/TEST-123`) to attach it as context.
+The agent does not read them autonomously mid-task — the tools remain its path
+to the same data, so resources are additive, never a replacement.
+
 ## SDK client layer
 
 - **`TrackerConfig`** — frozen dataclass; `from_env()` reads the environment and

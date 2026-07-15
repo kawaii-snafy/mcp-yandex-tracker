@@ -77,6 +77,19 @@ package), or run it explicitly:
 - `python -m mcp_yandex_tracker`
 - `python run_server.py`
 
+## Resources (@-mentions)
+
+Besides the `tracker_*` tools, the server exposes read-only **resources** under
+the `tracker://` scheme. In hosts that consume them (e.g. Claude Code), reference
+one with an `@`-mention to attach it as context — the agent still uses the tools
+to act:
+
+- `@yandex-tracker:tracker://issue/TEST-123` — a single issue snapshot
+- `@yandex-tracker:tracker://statuses` (also `priorities`, `issue-types`,
+  `fields`, `link-types`, `queues`) — reference dictionaries
+
+(Replace `yandex-tracker` with whatever name you gave the server in the host.)
+
 ## Smoke test without a host
 
 MCP requires the `initialize` handshake before any other request, so pipe it

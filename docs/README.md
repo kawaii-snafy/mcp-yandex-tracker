@@ -24,4 +24,6 @@ protocol messages, logs go to stderr**. Everything lives in one module,
 layer** (the `@tool`-decorated typed functions and a cached
 `YandexTrackerClient`) and an **SDK client layer** (wraps the Tracker SDK and
 serializes SDK objects to plain compact JSON). The client is built once
-(lazily) from environment variables and reused. All tools are named `tracker_*`.
+(lazily) from environment variables and reused. All tools are named `tracker_*`;
+a few read-only `tracker://` **resources** (issue snapshot + reference
+dictionaries) sit alongside them for `@`-mention context.

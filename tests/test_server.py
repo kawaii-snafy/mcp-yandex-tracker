@@ -314,6 +314,34 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(json.loads(result)["text"], text)
 
+    # --- Resources ---------------------------------------------------------
+    async def test_resources_and_template_listed(self):
+        static = {str(r.uri) for r in await server.mcp.list_resources()}
+        templates = {t.uriTemplate for t in await server.mcp.list_resource_templates()}
+        self.assertEqual(
+            static,
+            {
+                "tracker://queues",
+                "tracker://statuses",
+                "tracker://priorities",
+                "tracker://issue-types",
+                "tracker://fields",
+                "tracker://link-types",
+            },
+        )
+        self.assertIn("tracker://issue/{key}", templates)
+
+    async def test_issue_resource_reads_via_client(self):
+        contents = list(await server.mcp.read_resource("tracker://issue/TEST-1"))
+        self.assertEqual(contents[0].mime_type, "application/json")
+        self.assertIn('"key":"TEST-1"', contents[0].content)
+        self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
+
+    async def test_reference_resource_reads_via_client(self):
+        contents = list(await server.mcp.read_resource("tracker://statuses"))
+        self.assertEqual(json.loads(contents[0].content), [{"key": "open"}])
+        self.assertEqual(self.fake.calls, [("list_statuses",)])
+
     # --- Errors ------------------------------------------------------------
     async def test_missing_required_argument_is_tool_error(self):
         with self.assertRaises(ToolError):

@@ -60,7 +60,10 @@ that is hand-rolled here.
   tool's input schema from the function's type hints and
   `Annotated[..., Field(description=...)]` metadata, and its description from the
   docstring. Each tool body just calls a `YandexTrackerClient` method and
-  returns the raw payload.
+  returns the raw payload. A few `@mcp.resource("tracker://...")` functions sit
+  alongside the tools (issue snapshot + reference dictionaries) as a *user*-facing
+  `@`-mention surface — additive context, not a replacement for the tools the
+  agent calls autonomously.
 - **SDK client layer** — `YandexTrackerClient` wraps the Tracker SDK; every
   method funnels through `_call_sdk` (maps SDK/transport exceptions to
   `TrackerApiError`) and `_to_plain` (recursively serializes SDK objects to

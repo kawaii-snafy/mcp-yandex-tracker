@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from pydantic import Field
 
 __version__ = "0.5.0"
@@ -1031,6 +1031,75 @@ def tracker_delete_attachment(
 ) -> Any:
     """Delete an attachment from a Yandex Tracker issue by its attachment id (get ids from tracker_list_attachments)."""
     return get_client().delete_attachment(issue_key, attachment_id)
+
+
+# ===========================================================================
+# Resources — read-only context the user can @-mention in Claude Code
+# ===========================================================================
+# Resources are a *user*-facing surface (pulled into a prompt via @-mention and
+# attached as context), not something the agent reads autonomously mid-task —
+# the tools above stay the agent's path to the same data. These add a natural
+# way to drop an issue snapshot or a reference dictionary into the conversation.
+def resource(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize a resource body to compact JSON and map domain errors."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            return _dump(fn(*args, **kwargs))
+        except (TrackerApiError, TrackerConfigError, ValueError) as exc:
+            raise ResourceError(str(exc)) from exc
+
+    return wrapper
+
+
+@mcp.resource("tracker://issue/{key}", mime_type="application/json")
+@resource
+def issue_resource(key: str) -> Any:
+    """A single Yandex Tracker issue by key (e.g. tracker://issue/TEST-123)."""
+    return get_client().get_issue(key)
+
+
+@mcp.resource("tracker://queues", mime_type="application/json")
+@resource
+def queues_resource() -> Any:
+    """The Yandex Tracker queue list."""
+    return get_client().list_queues()
+
+
+@mcp.resource("tracker://statuses", mime_type="application/json")
+@resource
+def statuses_resource() -> Any:
+    """The global Yandex Tracker status dictionary."""
+    return get_client().list_statuses()
+
+
+@mcp.resource("tracker://priorities", mime_type="application/json")
+@resource
+def priorities_resource() -> Any:
+    """The global Yandex Tracker priority dictionary."""
+    return get_client().list_priorities()
+
+
+@mcp.resource("tracker://issue-types", mime_type="application/json")
+@resource
+def issue_types_resource() -> Any:
+    """The global Yandex Tracker issue-type dictionary."""
+    return get_client().list_issue_types()
+
+
+@mcp.resource("tracker://fields", mime_type="application/json")
+@resource
+def fields_resource() -> Any:
+    """Yandex Tracker fields, including custom fields."""
+    return get_client().list_fields()
+
+
+@mcp.resource("tracker://link-types", mime_type="application/json")
+@resource
+def link_types_resource() -> Any:
+    """Yandex Tracker link types (valid relationship values for links)."""
+    return get_client().list_link_types()
 
 
 def main() -> None:

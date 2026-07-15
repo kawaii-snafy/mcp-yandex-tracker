@@ -91,10 +91,11 @@ right SDK method, and a server-level test that the tool name dispatches to it.
   (connection pool) is shared across tool calls. The env is read once, at first
   use. If you ever need per-request config, swap the singleton for a keyed cache
   rather than reaching for a different HTTP layer.
-- **More primitives.** To expose resources or prompts, add `@mcp.resource(...)`
-  / `@mcp.prompt()` functions alongside the tools — FastMCP handles their
-  discovery and dispatch. Reference dictionaries (statuses, priorities, fields,
-  queue metadata) are natural resource candidates.
+- **More primitives.** Read-only context is already exposed as `@mcp.resource`
+  functions under `tracker://` (issue snapshot + reference dictionaries), wrapped
+  by the local `resource` helper (compact JSON + `ResourceError` mapping) — add
+  more the same way. To add templated prompts, use `@mcp.prompt()`; FastMCP
+  surfaces them as host slash commands.
 - **Transport.** FastMCP owns JSON-RPC framing, batching, and the stdio loop.
   There is no read loop to maintain here.
 - **Serialization edge cases.** If a new SDK return type does not expose
