@@ -73,15 +73,21 @@ Optional:
 
 ## Verify locally
 
-Run the MCP server and ask for its tool list:
+Run the MCP server and ask for its tool list. MCP requires the `initialize`
+handshake before any other request, so send it (and the `initialized`
+notification) first:
 
 ```sh
-YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
-  uvx mcp-yandex-tracker <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+| YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." uvx mcp-yandex-tracker
 ```
 
-The response should be a JSON-RPC object with `tracker_*` tools. The server is
-stdio-only, so stdout is reserved for MCP JSON-RPC messages.
+The second response line should be a JSON-RPC object with `tracker_*` tools. The
+server is stdio-only, so stdout is reserved for MCP JSON-RPC messages (logs go
+to stderr).
 
 ## Documentation
 

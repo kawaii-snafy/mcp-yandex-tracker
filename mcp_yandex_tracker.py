@@ -1,10 +1,24 @@
+"""Yandex Tracker MCP server (single-file stdio server built on FastMCP)."""
+
 from __future__ import annotations
 
+import functools
+import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
+
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from pydantic import Field
+
+__version__ = "0.5.0"
 
 
+# ===========================================================================
+# SDK client layer — everything Yandex Tracker, via the official SDK
+# ===========================================================================
 class TrackerConfigError(RuntimeError):
     """Raised when the Yandex Tracker client is missing required settings."""
 
@@ -617,3 +631,411 @@ def _to_plain(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+# ===========================================================================
+# MCP server layer — FastMCP tools over the client above
+# ===========================================================================
+mcp = FastMCP("mcp-yandex-tracker")
+
+
+# One client per process, built lazily. The Yandex Tracker SDK opens a
+# requests.Session (connection pool) on construction; reusing a single instance
+# keeps HTTP keep-alive across tool calls instead of rebuilding it every time.
+# _client_factory stays swappable so tests can inject a fake client.
+_client: YandexTrackerClient | None = None
+_client_factory: Callable[[], YandexTrackerClient] = YandexTrackerClient
+
+
+def get_client() -> YandexTrackerClient:
+    global _client
+    if _client is None:
+        _client = _client_factory()
+    return _client
+
+
+def _dump(payload: Any) -> str:
+    # Compact separators: pretty-printing adds whitespace tokens to every line
+    # of every response for no benefit — the model reads compact JSON just as
+    # well.
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Register a Yandex Tracker tool.
+
+    Wraps the handler so its raw return value is serialized to a single compact
+    JSON text block (structured_output=False keeps FastMCP from also emitting a
+    duplicating structuredContent block and an output schema), and domain
+    errors surface as clean isError tool results instead of internal errors.
+    functools.wraps preserves the handler signature so FastMCP still derives the
+    input schema from its typed parameters.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            return _dump(fn(*args, **kwargs))
+        except (TrackerApiError, TrackerConfigError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    return mcp.tool(structured_output=False)(wrapper)
+
+
+# --- Issues -----------------------------------------------------------------
+@tool
+def tracker_get_issue(issue_key: str) -> Any:
+    """Get a Yandex Tracker issue by key."""
+    return get_client().get_issue(issue_key)
+
+
+@tool
+def tracker_search_issues(
+    query: str | None = None,
+    filter: dict | None = None,
+    order: str | None = None,
+    keys: list[str] | None = None,
+    per_page: Annotated[
+        int,
+        Field(ge=1, le=100, description="Max issues to return (hard cap, not just page size). Default 20."),
+    ] = 20,
+    page: Annotated[int, Field(ge=1)] = 1,
+    include_total: Annotated[
+        bool,
+        Field(description="Also return the total match count (extra request). Response becomes {issues, total, page, per_page}."),
+    ] = False,
+    full: Annotated[
+        bool,
+        Field(description="Return complete issue objects instead of the compact projection. Off by default to keep responses small."),
+    ] = False,
+) -> Any:
+    """Search Yandex Tracker issues using query language, filter fields, or keys.
+
+    Returns a compact projection of each issue (key, summary, status, type,
+    priority, assignee, queue, parent, epic, sprint, tags, timestamps) — pass
+    full=true for the complete issue objects. per_page is a hard cap on how many
+    issues are returned.
+    """
+    return get_client().search_issues(
+        query=query,
+        filter=filter,
+        order=order,
+        keys=keys,
+        per_page=per_page,
+        page=page,
+        include_total=include_total,
+        full=full,
+    )
+
+
+@tool
+def tracker_create_issue(
+    queue: str,
+    summary: str,
+    description: str | None = None,
+    fields: Annotated[dict | None, Field(description="Additional Tracker issue fields.")] = None,
+) -> Any:
+    """Create a Yandex Tracker issue."""
+    return get_client().create_issue(
+        queue=queue, summary=summary, description=description, fields=fields
+    )
+
+
+@tool
+def tracker_update_issue(
+    issue_key: str,
+    fields: Annotated[dict, Field(description="Fields to patch (raw Tracker API field names and values).")],
+) -> Any:
+    """Update fields on a Yandex Tracker issue.
+
+    fields is a raw Tracker PATCH body, so it also covers: tags via
+    {"tags": {"add": [...], "remove": [...]}} (or a full array to replace);
+    components the same way (id or name); parent reassignment via
+    {"parent": {"key": "TEST-2"}}. Epic association is a link, not a field — use
+    tracker_link_issues for that.
+    """
+    return get_client().update_issue(issue_key, fields)
+
+
+# --- Comments ---------------------------------------------------------------
+@tool
+def tracker_add_comment(issue_key: str, text: str) -> Any:
+    """Add a comment to a Yandex Tracker issue."""
+    return get_client().add_comment(issue_key, text)
+
+
+@tool
+def tracker_list_comments(issue_key: str) -> Any:
+    """List comments for a Yandex Tracker issue."""
+    return get_client().list_comments(issue_key)
+
+
+@tool
+def tracker_delete_comment(
+    issue_key: str,
+    comment_id: Annotated[str, Field(description="Comment id from tracker_list_comments.")],
+) -> Any:
+    """Delete a comment from a Yandex Tracker issue by its comment id (get ids from tracker_list_comments)."""
+    return get_client().delete_comment(issue_key, comment_id)
+
+
+# --- Transitions ------------------------------------------------------------
+@tool
+def tracker_list_transitions(issue_key: str) -> Any:
+    """List available workflow transitions for a Yandex Tracker issue."""
+    return get_client().list_transitions(issue_key)
+
+
+@tool
+def tracker_move_issue_status(
+    issue_key: str,
+    status: Annotated[str, Field(description="Transition id/display or destination status id/key/display.")],
+    fields: Annotated[dict | None, Field(description="Optional fields for the transition screen, such as comment.")] = None,
+) -> Any:
+    """Move a Yandex Tracker issue to a status by matching an available transition."""
+    return get_client().move_issue_status(issue_key, status, fields)
+
+
+@tool
+def tracker_execute_transition(
+    issue_key: str,
+    transition_id: str,
+    fields: dict | None = None,
+) -> Any:
+    """Execute a Yandex Tracker workflow transition."""
+    return get_client().execute_transition(issue_key, transition_id, fields)
+
+
+# --- Links ------------------------------------------------------------------
+@tool
+def tracker_link_issues(
+    issue_key: Annotated[str, Field(description="Source issue, e.g. TEST-1.")],
+    relationship: Annotated[
+        str,
+        Field(description="Link type, e.g. relates, depends on, is dependent by, is subtask for, is parent task for, duplicates."),
+    ],
+    target_issue: Annotated[str, Field(description="Issue to link to, e.g. TEST-2.")],
+) -> Any:
+    """Create a link between two Yandex Tracker issues.
+
+    Use tracker_list_link_types to discover valid relationship values.
+    """
+    return get_client().link_issue(issue_key, relationship, target_issue)
+
+
+@tool
+def tracker_list_links(issue_key: str) -> Any:
+    """List links of a Yandex Tracker issue (each carries an id for tracker_unlink_issues)."""
+    return get_client().list_links(issue_key)
+
+
+@tool
+def tracker_unlink_issues(
+    issue_key: str,
+    link_id: Annotated[str, Field(description="Link id from tracker_list_links.")],
+) -> Any:
+    """Remove a link from a Yandex Tracker issue by its link id (get ids from tracker_list_links)."""
+    return get_client().unlink_issue(issue_key, link_id)
+
+
+# --- Queues & users ---------------------------------------------------------
+@tool
+def tracker_list_queues() -> Any:
+    """List Yandex Tracker queues."""
+    return get_client().list_queues()
+
+
+@tool
+def tracker_list_users(
+    email: Annotated[str | None, Field(description="Filter by exact email match.")] = None,
+    group: Annotated[str | None, Field(description="Filter by group id.")] = None,
+    per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
+) -> Any:
+    """List Yandex Tracker users (for assignee, followers, and other user fields).
+
+    Supports server-side filters: email (exact match) and group. Note: Tracker
+    has no server-side search by login or name — fetch and filter client-side
+    for that.
+    """
+    return get_client().list_users(email=email, group=group, per_page=per_page)
+
+
+@tool
+def tracker_get_user(
+    login_or_uid: Annotated[str, Field(description="User login (e.g. jsmith) or numeric uid.")],
+) -> Any:
+    """Get a single Yandex Tracker user by login or uid."""
+    return get_client().get_user(login_or_uid)
+
+
+@tool
+def tracker_get_current_user() -> Any:
+    """Get the currently authenticated Yandex Tracker user (the token owner)."""
+    return get_client().get_current_user()
+
+
+# --- Reference dictionaries -------------------------------------------------
+@tool
+def tracker_list_statuses() -> Any:
+    """List the global Yandex Tracker status dictionary."""
+    return get_client().list_statuses()
+
+
+@tool
+def tracker_list_issue_types() -> Any:
+    """List the global Yandex Tracker issue-type dictionary."""
+    return get_client().list_issue_types()
+
+
+@tool
+def tracker_list_priorities() -> Any:
+    """List the global Yandex Tracker priority dictionary."""
+    return get_client().list_priorities()
+
+
+@tool
+def tracker_list_fields() -> Any:
+    """List Yandex Tracker fields, including custom fields."""
+    return get_client().list_fields()
+
+
+@tool
+def tracker_list_link_types() -> Any:
+    """List Yandex Tracker link types (valid relationship values for tracker_link_issues)."""
+    return get_client().list_link_types()
+
+
+@tool
+def tracker_list_queue_versions(
+    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+) -> Any:
+    """List versions defined in a specific Yandex Tracker queue."""
+    return get_client().list_queue_versions(queue)
+
+
+@tool
+def tracker_list_queue_components(
+    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+) -> Any:
+    """List components defined in a specific Yandex Tracker queue."""
+    return get_client().list_queue_components(queue)
+
+
+@tool
+def tracker_list_queue_local_fields(
+    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+) -> Any:
+    """List local (queue-specific custom) fields of a Yandex Tracker queue.
+
+    Unlike tracker_list_fields, these are scoped to the queue.
+    """
+    return get_client().list_queue_local_fields(queue)
+
+
+@tool
+def tracker_list_queue_tags(
+    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+) -> Any:
+    """List tags defined in a specific Yandex Tracker queue."""
+    return get_client().list_queue_tags(queue)
+
+
+# --- Activity ---------------------------------------------------------------
+@tool
+def tracker_get_changelog(
+    issue_key: str,
+    field: Annotated[str | None, Field(description="Filter to changes of a single field id, e.g. status.")] = None,
+    type: Annotated[str | None, Field(description="Filter by change type, e.g. IssueWorkflow, IssueUpdated.")] = None,
+    per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
+) -> Any:
+    """Get the change history of a Yandex Tracker issue.
+
+    Optionally filter by field and change type.
+    """
+    return get_client().get_changelog(issue_key, field=field, change_type=type, per_page=per_page)
+
+
+@tool
+def tracker_list_worklog(issue_key: str) -> Any:
+    """List worklog (time-tracking) records of a Yandex Tracker issue."""
+    return get_client().list_worklog(issue_key)
+
+
+@tool
+def tracker_add_worklog(
+    issue_key: str,
+    duration: Annotated[str, Field(description="ISO 8601 duration, e.g. PT1H30M for 1h30m.")],
+    comment: str | None = None,
+    start: Annotated[str | None, Field(description="ISO 8601 start datetime, e.g. 2026-07-03T10:00:00.000+0000.")] = None,
+) -> Any:
+    """Add a worklog (time spent) record to a Yandex Tracker issue."""
+    return get_client().add_worklog(issue_key, duration, comment=comment, start=start)
+
+
+# --- Checklist --------------------------------------------------------------
+@tool
+def tracker_list_checklist(issue_key: str) -> Any:
+    """List checklist items of a Yandex Tracker issue."""
+    return get_client().list_checklist(issue_key)
+
+
+@tool
+def tracker_add_checklist_item(
+    issue_key: str,
+    text: str,
+    checked: Annotated[bool, Field(description="Initial checked state.")] = False,
+) -> Any:
+    """Add a checklist item to a Yandex Tracker issue."""
+    return get_client().add_checklist_item(issue_key, text, checked=checked)
+
+
+# --- Attachments ------------------------------------------------------------
+@tool
+def tracker_list_attachments(issue_key: str) -> Any:
+    """List attachment metadata (id, name, size, url) of a Yandex Tracker issue.
+
+    Use tracker_download_attachment to fetch the bytes.
+    """
+    return get_client().list_attachments(issue_key)
+
+
+@tool
+def tracker_download_attachment(
+    issue_key: str,
+    attachment_id: Annotated[str, Field(description="Attachment id from tracker_list_attachments.")],
+    dest_dir: Annotated[str, Field(description="Absolute directory path to save the file into.")],
+    filename: Annotated[str | None, Field(description="Optional override for the saved file name.")] = None,
+) -> Any:
+    """Download an issue attachment to a local directory and return the saved file path.
+
+    Tracker attachment URLs need authentication, so this proxies the download
+    through the server. Ask the user where to save before calling.
+    """
+    return get_client().download_attachment(issue_key, attachment_id, dest_dir, filename=filename)
+
+
+@tool
+def tracker_upload_attachment(
+    issue_key: str,
+    file_path: Annotated[str, Field(description="Absolute path to the local file to upload.")],
+    filename: Annotated[str | None, Field(description="Optional name to store the attachment under in Tracker.")] = None,
+) -> Any:
+    """Upload a local file as an attachment on a Yandex Tracker issue."""
+    return get_client().upload_attachment(issue_key, file_path, filename=filename)
+
+
+@tool
+def tracker_delete_attachment(
+    issue_key: str,
+    attachment_id: Annotated[str, Field(description="Attachment id from tracker_list_attachments.")],
+) -> Any:
+    """Delete an attachment from a Yandex Tracker issue by its attachment id (get ids from tracker_list_attachments)."""
+    return get_client().delete_attachment(issue_key, attachment_id)
+
+
+def main() -> None:
+    mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

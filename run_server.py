@@ -1,4 +1,4 @@
-from yandex_tracker_mcp_server.__main__ import main
+from mcp_yandex_tracker import main
 
 
 if __name__ == "__main__":

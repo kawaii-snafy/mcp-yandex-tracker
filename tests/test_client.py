@@ -1,6 +1,6 @@
 import unittest
 
-from yandex_tracker_mcp_server.client import (
+from mcp_yandex_tracker import (
     TrackerApiError,
     TrackerConfig,
     TrackerConfigError,

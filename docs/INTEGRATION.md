@@ -12,8 +12,9 @@ if you wrap the server, do not merge stderr into stdout.
 
 ## Environment
 
-Configuration comes entirely from environment variables, read fresh on every
-tool call (`TrackerConfig.from_env`).
+Configuration comes entirely from environment variables, read once when the
+client is first built (`TrackerConfig.from_env`) and then reused for the life of
+the process.
 
 ### Required
 
@@ -73,16 +74,20 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 Point the host at the console script `mcp-yandex-tracker` (installed by the
 package), or run it explicitly:
 
-- `python -m yandex_tracker_mcp_server`
+- `python -m mcp_yandex_tracker`
 - `python run_server.py`
 
 ## Smoke test without a host
 
-Pipe a raw request in and read the response back:
+MCP requires the `initialize` handshake before any other request, so pipe it
+(and the `initialized` notification) in ahead of `tools/list`:
 
 ```sh
-YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." \
-  uvx mcp-yandex-tracker <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+| YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." uvx mcp-yandex-tracker
 ```
 
 `tools/list` needs no credentials, so it is the safest first check — a healthy

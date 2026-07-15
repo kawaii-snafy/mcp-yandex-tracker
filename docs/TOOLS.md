@@ -6,9 +6,10 @@ JSON. Business failures (bad arguments, Tracker API errors, config problems)
 come back as the **same shape** with `isError: true` and a plain-text message
 instead of JSON.
 
-The canonical schemas live in `TOOLS` in
-[`server.py`](../yandex_tracker_mcp_server/server.py); this page is the
-human-readable mirror. If you change a schema there, update this table.
+The canonical schemas are derived from the `@tool`-decorated functions in
+[`mcp_yandex_tracker.py`](../mcp_yandex_tracker.py) (from their type hints and
+`Field` descriptions); this page is the human-readable mirror. If you change a
+signature there, update this table.
 
 Argument required-ness note: a required string that is empty (`""`) is rejected
 the same as if it were missing.

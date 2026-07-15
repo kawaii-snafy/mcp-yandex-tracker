@@ -5,68 +5,69 @@ tools, see [TOOLS.md](TOOLS.md); to *connect* it, see [INTEGRATION.md](INTEGRATI
 
 ## Layout
 
+The whole server is a single top-level module:
+
 ```
-yandex_tracker_mcp_server/
-├── __init__.py    # package version (__version__)
-├── __main__.py    # main() -> serve_stdio(); enables `python -m yandex_tracker_mcp_server`
-├── server.py      # MCP protocol: tool schemas, dispatch, stdio loop, error mapping
-└── client.py      # SDK wrapper: config, calls, transition matching, serialization
-tests/             # unittest suite over fakes (no network)
+mcp_yandex_tracker.py   # everything: SDK client layer + FastMCP tools + main()
+run_server.py           # thin `from mcp_yandex_tracker import main` launcher
+tests/                  # unittest suite over fakes (no network)
 ```
 
-Entry points, all reaching `serve_stdio()`:
+Inside `mcp_yandex_tracker.py`, two clearly-commented sections:
+
+- **SDK client layer** — `YandexTrackerClient` and helpers: config, SDK calls,
+  transition matching, serialization.
+- **MCP server layer** — the `FastMCP` instance, the `@tool` wrapper, the client
+  lifecycle, and the 35 `@tool` functions.
+
+Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
 
 - console script `mcp-yandex-tracker` (declared in `pyproject.toml`)
-- `python -m yandex_tracker_mcp_server`
+- `python -m mcp_yandex_tracker`
 - `python run_server.py`
 
-## Request lifecycle
+## Protocol layer: the official MCP SDK
 
-```
-stdin line
-  └─ serve_stdio()                     # server.py
-       ├─ json.loads(line)             # dict = single, list = JSON-RPC batch
-       ├─ _handle_stdio_item(...)      # per element; non-dict -> -32600
-       └─ McpServer.handle_message()
-            ├─ no "id"  -> _handle_notification (returns nothing)
-            └─ has "id" -> _dispatch(method, params)
-                              ├─ initialize / ping / tools/list
-                              ├─ resources/list / prompts/list  (empty)
-                              └─ tools/call -> _call_tool()
-                                   ├─ client = client_factory()   # fresh per call
-                                   ├─ handlers[name](client, args)# server.py -> client.py
-                                   └─ _tool_result / _tool_error
-```
+The JSON-RPC framing, stdio transport (`stdio_server`, UTF-8 pinned), lifecycle
+(`initialize` handshake, capability negotiation), and `tools/list` / `tools/call`
+routing are all provided by the SDK's `FastMCP`. We do **not** hand-roll them.
 
-Responses are written back as newline-delimited JSON (compact separators). A
-batch request produces a JSON array of responses; notifications and empty
-batches produce no line at all.
+- A single module-level `mcp = FastMCP("mcp-yandex-tracker")` holds the server.
+- Every tool is a plain typed Python function decorated with the local `@tool`
+  wrapper (see below). FastMCP derives each tool's `inputSchema` from the
+  function's type hints and `Annotated[..., Field(description=...)]` metadata,
+  and its description from the docstring.
+- `initialize` requires the standard MCP handshake before any `tools/call` —
+  the SDK enforces this (a bare `tools/list` before `initialize` returns
+  `-32602`).
 
-## `server.py` — the protocol layer
+### The `@tool` wrapper (MCP server layer)
 
-- **`TOOLS`** — the list of tool descriptors (name, description, `inputSchema`).
-  `_schema()` builds strict object schemas (`additionalProperties: false`).
-  This is the single source of truth for tool shapes; keep [TOOLS.md](TOOLS.md)
-  in sync.
-- **`McpServer._dispatch`** — routes MCP methods. Supported: `initialize`,
-  `ping`, `tools/list`, `tools/call`, `resources/list`, `prompts/list`. Anything
-  else raises and becomes a JSON-RPC error. `initialize` advertises
-  `protocolVersion` `2025-03-26` and a tools capability with
-  `listChanged: false`.
-- **`McpServer._call_tool`** — maps a tool name to a lambda that calls the
-  matching `YandexTrackerClient` method, then wraps the result. `_required()`
-  enforces mandatory arguments (empty string counts as missing).
-- **Two error channels** — deliberately separate:
-  - *Tool errors* (`_tool_error`, `isError: true`): raised by
-    `TrackerApiError`, `TrackerConfigError`, or `ValueError` during a
-    `tools/call`. The JSON-RPC call itself still succeeds.
-  - *Protocol errors* (`_error_payload`, JSON-RPC `error`): parse errors
-    (`-32700`), bad params/`ValueError` at dispatch (`-32602`), invalid request
-    (`-32600`), everything else internal (`-32603`).
-- **`serve_stdio`** — the read loop. Isolates per-item failures so one bad
-  element in a batch cannot suppress the others' responses.
+`tool` is a thin decorator around `mcp.tool(structured_output=False)` that every
+handler uses. It does two jobs:
 
-## `client.py` — the SDK layer
+- **Serialize once, compact.** The handler returns the raw client payload; the
+  wrapper runs it through `_dump` (`json.dumps(..., ensure_ascii=False,
+  separators=(",", ":"))`) into a single `TextContent` block.
+  `structured_output=False` tells FastMCP not to also emit a duplicating
+  `structuredContent` block or an output schema — this keeps responses
+  token-lean and Cyrillic intact.
+- **Map domain errors.** `TrackerApiError`, `TrackerConfigError`, and
+  `ValueError` raised by the handler become a `ToolError`, which the SDK returns
+  as a `tools/call` result with `isError: true` and a plain-text message (the
+  JSON-RPC call itself still succeeds). `functools.wraps` preserves the handler
+  signature so schema derivation still sees the typed parameters.
+
+### Client lifecycle
+
+- `get_client()` builds one `YandexTrackerClient` lazily and caches it in the
+  module-level `_client`. The Tracker SDK opens a `requests.Session` (connection
+  pool) on construction, so a single instance reused across tool calls keeps
+  HTTP keep-alive instead of rebuilding a session every call.
+- `_client_factory` (defaults to `YandexTrackerClient`) stays swappable so tests
+  inject a fake by setting `server._client = None; server._client_factory = …`.
+
+## SDK client layer
 
 - **`TrackerConfig`** — frozen dataclass; `from_env()` reads the environment and
   validates that a token and one org id are present. `_split_base_url` peels a
@@ -88,15 +89,16 @@ batches produce no line at all.
 
 ## Design constraints
 
-- **Official SDK only.** All Tracker access goes through `yandex_tracker_client`
-  objects. No `requests`/`urllib`/raw HTTP — see [EXTENDING.md](EXTENDING.md).
-- **stdout is protocol-only.** Diagnostics go to stderr (e.g. the notification
-  fallback in `_handle_notification`). Anything printed to stdout corrupts the
-  MCP stream.
-- **Minimal dependencies.** The only runtime dependency is the SDK.
-- **Stateless per call.** A new `YandexTrackerClient` (and thus a new SDK
-  client, reading env afresh) is built for each `tools/call`. See the scaling
-  note in [EXTENDING.md](EXTENDING.md) if this becomes a hotspot.
-- **Testability by injection.** `McpServer` takes a `client_factory` and
-  `YandexTrackerClient` takes a `tracker_client` / `tracker_client_factory`, so
-  the whole stack runs against fakes with no network.
+- **Official SDKs only.** The MCP layer is the `mcp` SDK's `FastMCP`; all Tracker
+  access goes through `yandex_tracker_client` objects. No `requests`/`urllib`/raw
+  HTTP for Tracker behavior — see [EXTENDING.md](EXTENDING.md).
+- **stdout is protocol-only.** FastMCP writes JSON-RPC to stdout and routes its
+  own logging to stderr. Anything you print to stdout corrupts the MCP stream.
+- **Minimal dependencies.** Runtime dependencies are `mcp` and the Tracker SDK.
+- **Token-lean responses.** Tools return a single compact-JSON text block
+  (`structured_output=False`); no output schema, no duplicating
+  `structuredContent`.
+- **Testability by injection.** The client singleton is built through
+  `_client_factory`, and `YandexTrackerClient` takes a `tracker_client` /
+  `tracker_client_factory`, so the whole stack runs against fakes with no
+  network.
