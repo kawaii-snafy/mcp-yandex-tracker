@@ -594,11 +594,24 @@ def _slim_issue(issue: Any) -> Any:
     return slim
 
 
+# Keys stripped from every serialized object: pure transport/metadata noise the
+# model never needs. `self` is the resource URL present on every Tracker object
+# and nested ref (~55 chars each); `cloudUid`/`passportUid` are internal Yandex
+# user identifiers duplicated alongside the human-readable `id`/`display`.
+# Dropping them recursively cuts a typical issue payload by roughly half with no
+# information loss.
+_NOISE_KEYS = frozenset({"self", "cloudUid", "passportUid"})
+
+
 def _to_plain(value: Any) -> Any:
     if hasattr(value, "as_dict"):
         return _to_plain(value.as_dict())
     if isinstance(value, dict):
-        return {key: _to_plain(item) for key, item in value.items()}
+        return {
+            key: _to_plain(item)
+            for key, item in value.items()
+            if key not in _NOISE_KEYS
+        }
     if isinstance(value, (list, tuple, set)):
         return [_to_plain(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:

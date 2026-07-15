@@ -481,7 +481,18 @@ class ClientTests(unittest.TestCase):
 
         result = client.search_issues(per_page=5, full=True)
 
-        self.assertEqual(result, [full_issue])
+        # full=True keeps every field but transport noise (`self`) is still stripped.
+        self.assertEqual(
+            result,
+            [
+                {
+                    "key": "TEST-9",
+                    "summary": "Do the thing",
+                    "description": "body",
+                    "status": {"id": "1", "key": "open"},
+                }
+            ],
+        )
 
     def test_link_issue_creates_link_via_sdk(self):
         issue = FakeIssue("TEST-1")
@@ -645,9 +656,10 @@ class ClientTests(unittest.TestCase):
         issue = FakeIssue("TEST-1")
         client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
 
+        # `self` is stripped as transport noise by _to_plain.
         self.assertEqual(
             client.get_current_user(),
-            {"self": "https://tracker/me", "login": "me", "uid": 42},
+            {"login": "me", "uid": 42},
         )
 
     def test_list_users_passes_server_side_filters(self):

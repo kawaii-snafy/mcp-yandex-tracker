@@ -639,11 +639,14 @@ def _opt_int_arg(arguments: dict[str, Any], name: str) -> int | None:
 
 
 def _tool_result(payload: Any) -> dict[str, Any]:
+    # Compact separators (no indentation): pretty-printing added whitespace
+    # tokens on every line of every response for no benefit — the model reads
+    # compact JSON just as well. Matches the stdio framing below.
     return {
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(payload, ensure_ascii=False, indent=2),
+                "text": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             }
         ],
         "isError": False,

@@ -451,7 +451,7 @@ class ServerTests(unittest.TestCase):
         )
 
         self.assertFalse(response["result"]["isError"])
-        self.assertIn('"key": "TEST-1"', response["result"]["content"][0]["text"])
+        self.assertIn('"key":"TEST-1"', response["result"]["content"][0]["text"])
         self.assertEqual(fake.calls, [("get_issue", "TEST-1")])
 
     def test_tool_argument_errors_are_tool_errors(self):
