@@ -73,8 +73,10 @@ read-only context under the `tracker://` scheme: one template,
 `tracker://issue/{key}`, plus static reference dictionaries
 (`tracker://statuses`, `priorities`, `issue-types`, `fields`, `link-types`,
 `queues`). They go through the same `get_client()` and serialize to compact
-JSON (`application/json`) via the local `resource` wrapper, which maps domain
-errors to `ResourceError`.
+JSON (`application/json`) via the local `resource` wrapper. (On a failed read the
+`ResourceError` a client sees is produced by FastMCP's resource path, which
+re-wraps any handler error — the wrapper's own error mapping is just parity with
+the tool path; its real job here is the compact serialization.)
 
 Resources are a **user**-facing surface: in Claude Code the user `@`-mentions
 one (e.g. `@yandex-tracker:tracker://issue/TEST-123`) to attach it as context.

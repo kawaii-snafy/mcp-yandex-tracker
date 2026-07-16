@@ -403,8 +403,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # End-to-end guard for the UTF-8 stdio path (FastMCP's stdio_server pins
         # UTF-8). Spawns the real server and round-trips a Cyrillic tool name
         # through the byte transport — it must come back intact in the error
-        # message. Replaces the old hand-rolled cp1251 regression tests; needs no
-        # Tracker credentials since an unknown-tool call never reaches the API.
+        # message. Needs no Tracker credentials since an unknown-tool call never
+        # reaches the API.
+        #
+        # This replaces the old hand-rolled cp1251 regression tests. It does NOT
+        # reproduce the Windows locale-switch scenario (native pipes on mac/linux
+        # are already UTF-8); the guarantee is now delegated to the mcp SDK, whose
+        # stdio_server re-wraps stdin/stdout as UTF-8 TextIOWrappers.
         import sys
 
         from mcp import ClientSession, StdioServerParameters

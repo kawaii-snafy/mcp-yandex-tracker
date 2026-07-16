@@ -14,6 +14,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from pydantic import Field
 
+# Keep this a plain string literal: pyproject reads it statically (setuptools
+# dynamic version via AST, no import) as the package version. A computed
+# expression would force setuptools to import this module at build time, pulling
+# in the runtime deps (mcp, pydantic, …).
 __version__ = "0.6.0"
 
 
@@ -638,9 +642,10 @@ def _to_plain(value: Any) -> Any:
 # MCP server layer — FastMCP tools over the client above
 # ===========================================================================
 mcp = FastMCP("mcp-yandex-tracker")
-# FastMCP doesn't accept a version; without this the initialize handshake would
-# advertise the mcp package version instead of ours. Set it on the low-level
-# server so serverInfo reports __version__.
+# FastMCP doesn't accept a version, so serverInfo would otherwise advertise the
+# mcp package version instead of ours. Set it on the low-level server. This
+# reaches a private SDK attribute, so a future mcp upgrade could change its
+# shape — test_initialize_advertises_our_version guards against that.
 mcp._mcp_server.version = __version__
 
 
@@ -1070,8 +1075,11 @@ def tracker_delete_attachment(
 def resource(uri: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register a read-only Tracker resource.
 
-    Symmetric with `tool`: the body's return value becomes a compact JSON
-    resource and domain errors surface as `ResourceError`.
+    The body's return value becomes a compact JSON resource. Note: FastMCP's
+    resource read path already wraps any handler error into a `ResourceError`
+    itself, so passing `ResourceError` to the shared `_json_safe` here is only
+    for parity with `tool` — the final error type comes from the SDK regardless.
+    The wrapper's real job for resources is the compact serialization.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
