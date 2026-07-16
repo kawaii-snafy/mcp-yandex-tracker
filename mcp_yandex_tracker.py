@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from pydantic import Field
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 
 # ===========================================================================
