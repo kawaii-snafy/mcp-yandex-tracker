@@ -14,8 +14,9 @@ These are load-bearing; a change that breaks one is a regression.
 2. **Never write to stdout.** stdout is the JSON-RPC channel. Diagnostics go to
    stderr (`print(..., file=sys.stderr)`). A stray `print()` corrupts the stream
    and the host will drop the connection.
-3. **Keep dependencies minimal.** The SDK is the only runtime dependency. Add
-   one only with a clear reason.
+3. **Keep dependencies minimal.** The runtime dependencies are `mcp` (the
+   official MCP SDK) and `yandex_tracker_client`. Add another only with a clear
+   reason.
 4. **Run the tests after any behavior change:**
    ```sh
    python3 -m unittest discover -s tests
@@ -23,9 +24,9 @@ These are load-bearing; a change that breaks one is a regression.
 
 ## Adding a tool
 
-A tool spans three edits plus tests. Follow the existing patterns.
+A tool spans two edits plus tests. Follow the existing patterns.
 
-1. **`client.py` — add the capability.** Add a method to `YandexTrackerClient`
+1. **SDK client layer — add the capability.** Add a method to `YandexTrackerClient`
    that performs the SDK work inside a closure passed to `_call_sdk`, and wrap
    the return value in `_to_plain` so it serializes:
 
@@ -41,28 +42,41 @@ A tool spans three edits plus tests. Follow the existing patterns.
    `_call_sdk` turns SDK exceptions into `TrackerApiError`; raise `ValueError`
    for bad arguments you detect yourself (it maps to a tool error, not a crash).
 
-2. **`server.py` — declare the schema.** Add an entry to `TOOLS` using
-   `_schema(properties, required)`. Keep `additionalProperties: false` (it is
-   baked into `_schema`) and name the tool `tracker_<verb>_<noun>`.
+2. **MCP server layer — add the `@tool` function.** Write a typed function named
+   `tracker_<verb>_<noun>`; FastMCP derives the `inputSchema` from its
+   parameters. Required arguments have no default; optional ones default to
+   `None`/a literal. Attach parameter descriptions with
+   `Annotated[..., Field(description="…")]` and the tool description as the
+   docstring. Return the raw client payload — the `@tool` wrapper serializes it
+   to compact JSON and maps domain errors:
 
-3. **`server.py` — wire the handler.** Add a lambda to the `handlers` dict in
-   `_call_tool`, using `_required(a, "x")` for mandatory args and `a.get("x")`
-   for optional ones.
+   ```python
+   @tool
+   def tracker_link_issues(
+       issue_key: str,
+       relationship: Annotated[str, Field(description="Link type, e.g. relates.")],
+       target_issue: str,
+   ) -> Any:
+       """Create a link between two Yandex Tracker issues."""
+       return get_client().link_issue(issue_key, relationship, target_issue)
+   ```
 
-4. **`docs/TOOLS.md` — document it.** Add the argument table so integrators see
+3. **`docs/TOOLS.md` — document it.** Add the argument table so integrators see
    it without reading code.
 
-5. **`tests/` — cover it.** Extend the fakes in `tests/test_client.py`
-   (`FakeIssue`, `FakeCollection`, …) and add a `tools/call` assertion in
+4. **`tests/` — cover it.** Extend the fakes in `tests/test_client.py`
+   (`FakeIssue`, `FakeCollection`, …) and add a `mcp.call_tool(...)` assertion in
    `tests/test_server.py` against the `FakeClient`.
 
 ## Testing model
 
 The suite (`tests/`) runs entirely on fakes — no network, no real token.
 
-- **`test_server.py`** injects a `FakeClient` via `McpServer(client_factory=…)`
-  and asserts on protocol behavior: capabilities, tool listing, tool-call
-  results, the two error channels, stdio framing, batch handling, notifications.
+- **`test_server.py`** injects a `FakeClient` by pointing the client singleton
+  at it (`server._client = None; server._client_factory = lambda: fake`) and
+  asserts on protocol behavior via `mcp.list_tools()` / `mcp.call_tool(...)`:
+  tool listing, no output schema, tool-call results, and error mapping (domain
+  errors surface as `ToolError`).
 - **`test_client.py`** injects a fake SDK client via
   `YandexTrackerClient(tracker_client=…)` and asserts on SDK usage, config
   parsing, transition matching, and `_to_plain` serialization.
@@ -72,17 +86,18 @@ right SDK method, and a server-level test that the tool name dispatches to it.
 
 ## Scaling notes
 
-- **Per-call client construction.** `_call_tool` builds a fresh
-  `YandexTrackerClient` — and therefore a fresh SDK client — on every
-  `tools/call`, re-reading the environment each time. This keeps the server
-  stateless and simple. If call volume makes SDK/session setup a bottleneck,
-  cache the client on the `McpServer` (guard it against config changes) rather
-  than reaching for a different HTTP layer.
-- **New MCP methods.** To support more of the protocol (resources, prompts,
-  logging), extend `McpServer._dispatch`. Unhandled methods currently raise and
-  surface as JSON-RPC errors.
-- **Batching.** `serve_stdio` already handles JSON-RPC batches and isolates
-  per-item failures; preserve that isolation if you touch the read loop.
+- **Cached client.** `get_client()` builds one `YandexTrackerClient` lazily and
+  reuses it for the life of the process, so the SDK's `requests.Session`
+  (connection pool) is shared across tool calls. The env is read once, at first
+  use. If you ever need per-request config, swap the singleton for a keyed cache
+  rather than reaching for a different HTTP layer.
+- **More primitives.** Read-only context is already exposed as `@mcp.resource`
+  functions under `tracker://` (issue snapshot + reference dictionaries), wrapped
+  by the local `resource` helper (compact JSON + `ResourceError` mapping) — add
+  more the same way. To add templated prompts, use `@mcp.prompt()`; FastMCP
+  surfaces them as host slash commands.
+- **Transport.** FastMCP owns JSON-RPC framing, batching, and the stdio loop.
+  There is no read loop to maintain here.
 - **Serialization edge cases.** If a new SDK return type does not expose
   `.as_dict()` and isn't a container/primitive, `_to_plain` stringifies it.
   Prefer teaching `_to_plain` (or the method) to unwrap it into structured JSON

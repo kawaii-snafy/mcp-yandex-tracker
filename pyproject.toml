@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-yandex-tracker"
-version = "0.5.0"
+dynamic = ["version"]
 description = "MCP stdio server for Yandex Tracker"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,7 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries",
 ]
-dependencies = ["yandex_tracker_client>=2.10"]
+dependencies = ["mcp>=1.28", "yandex_tracker_client>=2.10"]
 
 [project.urls]
 Homepage = "https://github.com/kawaii-snafy/mcp-yandex-tracker"
@@ -31,7 +31,10 @@ Repository = "https://github.com/kawaii-snafy/mcp-yandex-tracker"
 Issues = "https://github.com/kawaii-snafy/mcp-yandex-tracker/issues"
 
 [project.scripts]
-mcp-yandex-tracker = "yandex_tracker_mcp_server.__main__:main"
+mcp-yandex-tracker = "mcp_yandex_tracker:main"
 
-[tool.setuptools.packages.find]
-include = ["yandex_tracker_mcp_server*"]
+[tool.setuptools]
+py-modules = ["mcp_yandex_tracker"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mcp_yandex_tracker.__version__" }

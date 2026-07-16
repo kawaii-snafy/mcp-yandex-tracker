@@ -1,9 +1,10 @@
-import io
 import json
 import unittest
 
-from yandex_tracker_mcp_server.client import TrackerConfigError
-from yandex_tracker_mcp_server.server import McpServer, serve_stdio
+from mcp.server.fastmcp.exceptions import ResourceError, ToolError
+
+import mcp_yandex_tracker as server
+from mcp_yandex_tracker import TrackerApiError, TrackerConfigError, YandexTrackerClient
 
 
 class FakeClient:
@@ -151,37 +152,39 @@ class FakeClient:
         return {"deleted": attachment_id, "issue": issue_key}
 
 
-class ServerTests(unittest.TestCase):
-    def test_initialize_declares_tools_capability(self):
-        server = McpServer(client_factory=FakeClient)
+def _use_client(client):
+    """Point the server's lazy singleton at a specific (fake) client."""
+    server._client = None
+    server._client_factory = lambda: client
 
-        response = server.handle_message(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-        )
 
-        result = response["result"]
-        self.assertEqual(result["serverInfo"]["name"], "mcp-yandex-tracker")
-        self.assertIn("tools", result["capabilities"])
+class ServerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.fake = FakeClient()
+        _use_client(self.fake)
 
-    def test_tools_list_exposes_tracker_tools(self):
-        server = McpServer(client_factory=FakeClient)
+    def tearDown(self):
+        server._client = None
+        server._client_factory = YandexTrackerClient
 
-        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    async def _text(self, name, arguments):
+        content = await server.mcp.call_tool(name, arguments)
+        # structured_output=False makes every tool return a single text block.
+        self.assertEqual(len(content), 1)
+        self.assertEqual(content[0].type, "text")
+        return content[0].text
 
-        names = {tool["name"] for tool in response["result"]["tools"]}
-        self.assertIn("tracker_get_issue", names)
-        self.assertIn("tracker_search_issues", names)
-        self.assertIn("tracker_add_comment", names)
-        self.assertIn("tracker_list_transitions", names)
-        self.assertIn("tracker_move_issue_status", names)
-
-    def test_tools_list_exposes_link_and_dictionary_tools(self):
-        server = McpServer(client_factory=FakeClient)
-
-        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-
-        names = {tool["name"] for tool in response["result"]["tools"]}
+    # --- Discovery ---------------------------------------------------------
+    async def test_exposes_all_tracker_tools(self):
+        tools = await server.mcp.list_tools()
+        names = {tool.name for tool in tools}
+        self.assertEqual(len(tools), 35)
         for name in (
+            "tracker_get_issue",
+            "tracker_search_issues",
+            "tracker_add_comment",
+            "tracker_list_transitions",
+            "tracker_move_issue_status",
             "tracker_link_issues",
             "tracker_list_links",
             "tracker_unlink_issues",
@@ -190,16 +193,6 @@ class ServerTests(unittest.TestCase):
             "tracker_list_link_types",
             "tracker_list_queue_versions",
             "tracker_list_queue_components",
-        ):
-            self.assertIn(name, names)
-
-    def test_tools_list_exposes_activity_tools(self):
-        server = McpServer(client_factory=FakeClient)
-
-        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-
-        names = {tool["name"] for tool in response["result"]["tools"]}
-        for name in (
             "tracker_get_changelog",
             "tracker_list_worklog",
             "tracker_add_worklog",
@@ -208,16 +201,6 @@ class ServerTests(unittest.TestCase):
             "tracker_list_attachments",
             "tracker_download_attachment",
             "tracker_upload_attachment",
-        ):
-            self.assertIn(name, names)
-
-    def test_tools_list_exposes_native_sdk_tools(self):
-        server = McpServer(client_factory=FakeClient)
-
-        response = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-
-        names = {tool["name"] for tool in response["result"]["tools"]}
-        for name in (
             "tracker_get_user",
             "tracker_get_current_user",
             "tracker_delete_comment",
@@ -227,18 +210,40 @@ class ServerTests(unittest.TestCase):
         ):
             self.assertIn(name, names)
 
-    def test_native_sdk_tools_route_to_client(self):
+    async def test_initialize_advertises_our_version(self):
+        # serverInfo.version must report the module version, not the mcp package
+        # version (FastMCP defaults to the latter unless we set it explicitly).
+        opts = server.mcp._mcp_server.create_initialization_options()
+        self.assertEqual(opts.server_version, server.__version__)
+        self.assertEqual(opts.server_name, "mcp-yandex-tracker")
+
+    async def test_tools_have_no_output_schema(self):
+        # Token optimization: text-only responses (structured_output=False) must
+        # not publish an output schema or a duplicating structuredContent block.
+        tools = await server.mcp.list_tools()
+        with_schema = [tool.name for tool in tools if tool.outputSchema is not None]
+        self.assertEqual(with_schema, [])
+
+    async def test_required_arguments_are_declared(self):
+        tools = {tool.name: tool for tool in await server.mcp.list_tools()}
+        self.assertEqual(
+            tools["tracker_get_issue"].inputSchema.get("required"), ["issue_key"]
+        )
+        self.assertEqual(
+            tools["tracker_create_issue"].inputSchema.get("required"),
+            ["queue", "summary"],
+        )
+
+    # --- Routing -----------------------------------------------------------
+    async def test_get_issue_returns_compact_text(self):
+        text = await self._text("tracker_get_issue", {"issue_key": "TEST-1"})
+        self.assertIn('"key":"TEST-1"', text)
+        self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
+
+    async def test_tools_route_to_client(self):
         cases = [
-            (
-                "tracker_get_user",
-                {"login_or_uid": "jsmith"},
-                ("get_user", "jsmith"),
-            ),
-            (
-                "tracker_get_current_user",
-                {},
-                ("get_current_user",),
-            ),
+            ("tracker_get_user", {"login_or_uid": "jsmith"}, ("get_user", "jsmith")),
+            ("tracker_get_current_user", {}, ("get_current_user",)),
             (
                 "tracker_delete_comment",
                 {"issue_key": "TEST-1", "comment_id": "5"},
@@ -254,11 +259,7 @@ class ServerTests(unittest.TestCase):
                 {"queue": "TEST"},
                 ("list_queue_local_fields", "TEST"),
             ),
-            (
-                "tracker_list_queue_tags",
-                {"queue": "TEST"},
-                ("list_queue_tags", "TEST"),
-            ),
+            ("tracker_list_queue_tags", {"queue": "TEST"}, ("list_queue_tags", "TEST")),
             (
                 "tracker_list_users",
                 {"email": "a@b.c", "group": "42", "per_page": 50},
@@ -269,355 +270,159 @@ class ServerTests(unittest.TestCase):
                 {"issue_key": "TEST-1", "field": "status", "type": "IssueWorkflow"},
                 ("get_changelog", "TEST-1", "status", "IssueWorkflow", None),
             ),
+            (
+                "tracker_link_issues",
+                {"issue_key": "TEST-1", "relationship": "relates", "target_issue": "TEST-2"},
+                ("link_issue", "TEST-1", "relates", "TEST-2"),
+            ),
+            (
+                "tracker_unlink_issues",
+                {"issue_key": "TEST-1", "link_id": "100"},
+                ("unlink_issue", "TEST-1", "100"),
+            ),
+            (
+                "tracker_list_queue_versions",
+                {"queue": "TEST"},
+                ("list_queue_versions", "TEST"),
+            ),
+            (
+                "tracker_move_issue_status",
+                {"issue_key": "TEST-1", "status": "inProgress", "fields": {"comment": "starting"}},
+                ("move_issue_status", "TEST-1", "inProgress", {"comment": "starting"}),
+            ),
+            (
+                "tracker_add_worklog",
+                {"issue_key": "TEST-1", "duration": "PT1H", "comment": "x"},
+                ("add_worklog", "TEST-1", "PT1H", "x", None),
+            ),
+            (
+                "tracker_upload_attachment",
+                {"issue_key": "TEST-1", "file_path": "/tmp/up.txt"},
+                ("upload_attachment", "TEST-1", "/tmp/up.txt", None),
+            ),
+            (
+                "tracker_download_attachment",
+                {"issue_key": "TEST-1", "attachment_id": "att1", "dest_dir": "/tmp/dl"},
+                ("download_attachment", "TEST-1", "att1", "/tmp/dl", None),
+            ),
         ]
         for tool_name, arguments, expected_call in cases:
             with self.subTest(tool=tool_name):
                 fake = FakeClient()
-                server = McpServer(client_factory=lambda fake=fake: fake)
-
-                response = server.handle_message(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 20,
-                        "method": "tools/call",
-                        "params": {"name": tool_name, "arguments": arguments},
-                    }
-                )
-
-                self.assertFalse(response["result"]["isError"])
+                _use_client(fake)
+                await server.mcp.call_tool(tool_name, arguments)
                 self.assertEqual(fake.calls, [expected_call])
 
-    def test_upload_attachment_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 13,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_upload_attachment",
-                    "arguments": {"issue_key": "TEST-1", "file_path": "/tmp/up.txt"},
-                },
-            }
+    async def test_cyrillic_text_survives_round_trip(self):
+        # ensure_ascii=False keeps Cyrillic intact in the response payload.
+        text = "клик по лого → сброс дашборда «на главную»"
+        result = await self._text(
+            "tracker_add_comment", {"issue_key": "TEST-1", "text": text}
         )
+        self.assertEqual(json.loads(result)["text"], text)
 
-        self.assertFalse(response["result"]["isError"])
+    # --- Resources ---------------------------------------------------------
+    async def test_resources_and_template_listed(self):
+        static = {str(r.uri) for r in await server.mcp.list_resources()}
+        templates = {t.uriTemplate for t in await server.mcp.list_resource_templates()}
         self.assertEqual(
-            fake.calls,
-            [("upload_attachment", "TEST-1", "/tmp/up.txt", None)],
-        )
-
-    def test_download_attachment_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
+            static,
             {
-                "jsonrpc": "2.0",
-                "id": 12,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_download_attachment",
-                    "arguments": {
-                        "issue_key": "TEST-1",
-                        "attachment_id": "att1",
-                        "dest_dir": "/tmp/dl",
-                    },
-                },
-            }
+                "tracker://queues",
+                "tracker://statuses",
+                "tracker://priorities",
+                "tracker://issue-types",
+                "tracker://fields",
+                "tracker://link-types",
+            },
         )
+        self.assertIn("tracker://issue/{key}", templates)
 
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(
-            fake.calls,
-            [("download_attachment", "TEST-1", "att1", "/tmp/dl", None)],
-        )
+    async def test_issue_resource_reads_via_client(self):
+        contents = list(await server.mcp.read_resource("tracker://issue/TEST-1"))
+        self.assertEqual(contents[0].mime_type, "application/json")
+        self.assertIn('"key":"TEST-1"', contents[0].content)
+        self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
 
-    def test_search_invalid_per_page_is_tool_error(self):
-        server = McpServer(client_factory=FakeClient)
+    async def test_reference_resource_reads_via_client(self):
+        contents = list(await server.mcp.read_resource("tracker://statuses"))
+        self.assertEqual(json.loads(contents[0].content), [{"key": "open"}])
+        self.assertEqual(self.fake.calls, [("list_statuses",)])
 
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 10,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_search_issues",
-                    "arguments": {"query": "Queue: TEST", "per_page": "abc"},
-                },
-            }
-        )
+    async def test_resource_error_surfaces_message(self):
+        # The resource wrapper maps a domain error to ResourceError, so the read
+        # carries a clean message instead of leaking the raw internal error.
+        class Boom:
+            def list_statuses(self):
+                raise TrackerApiError(500, "boom")
 
-        self.assertNotIn("error", response)
-        self.assertTrue(response["result"]["isError"])
-        self.assertIn("must be an integer", response["result"]["content"][0]["text"])
+        _use_client(Boom())
+        with self.assertRaises(ResourceError) as ctx:
+            await server.mcp.read_resource("tracker://statuses")
+        self.assertIn("boom", str(ctx.exception))
 
-    def test_add_worklog_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
+    # --- Errors ------------------------------------------------------------
+    async def test_missing_required_argument_is_tool_error(self):
+        with self.assertRaises(ToolError):
+            await server.mcp.call_tool("tracker_get_issue", {})
 
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 11,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_add_worklog",
-                    "arguments": {"issue_key": "TEST-1", "duration": "PT1H", "comment": "x"},
-                },
-            }
-        )
+    async def test_empty_required_string_is_tool_error(self):
+        # Required string args carry min_length=1, so an empty value is rejected
+        # by validation before the handler (and before any network round-trip).
+        with self.assertRaises(ToolError):
+            await server.mcp.call_tool("tracker_get_issue", {"issue_key": ""})
+        self.assertEqual(self.fake.calls, [])
 
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(fake.calls, [("add_worklog", "TEST-1", "PT1H", "x", None)])
+    async def test_invalid_per_page_is_tool_error(self):
+        with self.assertRaises(ToolError):
+            await server.mcp.call_tool(
+                "tracker_search_issues", {"query": "Queue: TEST", "per_page": "abc"}
+            )
 
-    def test_link_issues_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
+    async def test_api_error_surfaces_message(self):
+        class Boom:
+            def get_issue(self, issue_key):
+                raise TrackerApiError(404, "not found")
 
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_link_issues",
-                    "arguments": {
-                        "issue_key": "TEST-1",
-                        "relationship": "relates",
-                        "target_issue": "TEST-2",
-                    },
-                },
-            }
-        )
+        _use_client(Boom())
+        with self.assertRaises(ToolError) as ctx:
+            await server.mcp.call_tool("tracker_get_issue", {"issue_key": "TEST-1"})
+        self.assertIn("not found", str(ctx.exception))
 
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(fake.calls, [("link_issue", "TEST-1", "relates", "TEST-2")])
-
-    def test_unlink_issues_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 8,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_unlink_issues",
-                    "arguments": {"issue_key": "TEST-1", "link_id": "100"},
-                },
-            }
-        )
-
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(fake.calls, [("unlink_issue", "TEST-1", "100")])
-
-    def test_list_queue_versions_routes_to_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 9,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_list_queue_versions",
-                    "arguments": {"queue": "TEST"},
-                },
-            }
-        )
-
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(fake.calls, [("list_queue_versions", "TEST")])
-
-    def test_tools_call_returns_text_result(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_get_issue",
-                    "arguments": {"issue_key": "TEST-1"},
-                },
-            }
-        )
-
-        self.assertFalse(response["result"]["isError"])
-        self.assertIn('"key":"TEST-1"', response["result"]["content"][0]["text"])
-        self.assertEqual(fake.calls, [("get_issue", "TEST-1")])
-
-    def test_tool_argument_errors_are_tool_errors(self):
-        server = McpServer(client_factory=FakeClient)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "tools/call",
-                "params": {"name": "tracker_get_issue", "arguments": {}},
-            }
-        )
-
-        self.assertTrue(response["result"]["isError"])
-        self.assertIn("Missing required argument", response["result"]["content"][0]["text"])
-
-    def test_client_configuration_errors_are_tool_errors(self):
-        def broken_client_factory():
+    async def test_client_configuration_error_surfaces_message(self):
+        def broken_factory():
             raise TrackerConfigError("missing token")
 
-        server = McpServer(client_factory=broken_client_factory)
+        server._client = None
+        server._client_factory = broken_factory
+        with self.assertRaises(ToolError) as ctx:
+            await server.mcp.call_tool("tracker_get_issue", {"issue_key": "TEST-1"})
+        self.assertIn("missing token", str(ctx.exception))
 
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_get_issue",
-                    "arguments": {"issue_key": "TEST-1"},
-                },
-            }
-        )
+    async def test_stdio_transport_preserves_cyrillic(self):
+        # End-to-end guard for the UTF-8 stdio path (FastMCP's stdio_server pins
+        # UTF-8). Spawns the real server and round-trips a Cyrillic tool name
+        # through the byte transport — it must come back intact in the error
+        # message. Needs no Tracker credentials since an unknown-tool call never
+        # reaches the API.
+        #
+        # This replaces the old hand-rolled cp1251 regression tests. It does NOT
+        # reproduce the Windows locale-switch scenario (native pipes on mac/linux
+        # are already UTF-8); the guarantee is now delegated to the mcp SDK, whose
+        # stdio_server re-wraps stdin/stdout as UTF-8 TextIOWrappers.
+        import sys
 
-        self.assertNotIn("error", response)
-        self.assertTrue(response["result"]["isError"])
-        self.assertIn("missing token", response["result"]["content"][0]["text"])
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
 
-    def test_move_issue_status_calls_client(self):
-        fake = FakeClient()
-        server = McpServer(client_factory=lambda: fake)
-
-        response = server.handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 6,
-                "method": "tools/call",
-                "params": {
-                    "name": "tracker_move_issue_status",
-                    "arguments": {
-                        "issue_key": "TEST-1",
-                        "status": "inProgress",
-                        "fields": {"comment": "starting"},
-                    },
-                },
-            }
-        )
-
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(
-            fake.calls,
-            [("move_issue_status", "TEST-1", "inProgress", {"comment": "starting"})],
-        )
-
-    def test_stdio_uses_newline_delimited_json_rpc(self):
-        input_stream = io.StringIO(
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
-        )
-        output_stream = io.StringIO()
-
-        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
-
-        response = json.loads(output_stream.getvalue())
-        self.assertEqual(response["jsonrpc"], "2.0")
-        self.assertEqual(response["id"], 1)
-        self.assertIn("tools", response["result"])
-
-    def test_stdio_batch_invalid_item_does_not_suppress_valid_response(self):
-        input_stream = io.StringIO(
-            json.dumps(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                    1,
-                ]
-            )
-            + "\n"
-        )
-        output_stream = io.StringIO()
-
-        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
-
-        response = json.loads(output_stream.getvalue())
-        self.assertEqual(len(response), 2)
-        self.assertEqual(response[0]["id"], 1)
-        self.assertIn("tools", response[0]["result"])
-        self.assertEqual(response[1]["id"], None)
-        self.assertEqual(response[1]["error"]["code"], -32600)
-
-    def test_notifications_do_not_emit_response(self):
-        input_stream = io.StringIO(
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
-        )
-        output_stream = io.StringIO()
-
-        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
-
-        self.assertEqual(output_stream.getvalue(), "")
-
-    def test_stdio_preserves_cyrillic_over_non_utf8_locale_streams(self):
-        # Regression: on Windows, sys.stdin/sys.stdout default to the locale
-        # code page (e.g. cp1251). The MCP transport is UTF-8, so a Cyrillic
-        # payload must survive even when the stream objects were created with a
-        # non-UTF-8 encoding. serve_stdio pins them to UTF-8.
-        text = "клик по лого → сброс дашборда «на главную»"
-        request = (
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 7,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "tracker_add_comment",
-                        "arguments": {"issue_key": "TEST-1", "text": text},
-                    },
-                },
-                ensure_ascii=False,
-            )
-            + "\n"
-        ).encode("utf-8")
-
-        input_stream = io.TextIOWrapper(io.BytesIO(request), encoding="cp1251", newline="")
-        out_bytes = io.BytesIO()
-        output_stream = io.TextIOWrapper(out_bytes, encoding="cp1251", newline="")
-
-        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
-        output_stream.flush()
-
-        # Wire bytes must be valid UTF-8 and preserve the original text.
-        response = json.loads(out_bytes.getvalue().decode("utf-8"))
-        inner = json.loads(response["result"]["content"][0]["text"])
-        self.assertEqual(inner["text"], text)
-
-    def test_stdio_malformed_bytes_do_not_crash_read_loop(self):
-        # A malformed byte on the UTF-8 transport must not raise
-        # UnicodeDecodeError out of the read loop and kill the server; it should
-        # decode leniently (U+FFFD), fail JSON parsing, and come back as a
-        # per-line JSON-RPC error while the server keeps serving.
-        valid = (
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
-        ).encode("utf-8")
-        request = b"\xff\xfe\n" + valid
-
-        input_stream = io.TextIOWrapper(io.BytesIO(request), encoding="cp1251", newline="")
-        out_bytes = io.BytesIO()
-        output_stream = io.TextIOWrapper(out_bytes, encoding="cp1251", newline="")
-
-        serve_stdio(input_stream, output_stream, McpServer(client_factory=FakeClient))
-        output_stream.flush()
-
-        lines = out_bytes.getvalue().decode("utf-8").splitlines()
-        self.assertEqual(len(lines), 2)
-        # First line: parse error for the malformed input.
-        self.assertIn("error", json.loads(lines[0]))
-        # Second line: the valid request that followed still gets a response.
-        self.assertEqual(json.loads(lines[1])["id"], 1)
+        name = "задача_кириллица_проверка"
+        params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_yandex_tracker"])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(name, {})
+        self.assertTrue(result.isError)
+        self.assertIn(name, result.content[0].text)
 
 
 if __name__ == "__main__":
