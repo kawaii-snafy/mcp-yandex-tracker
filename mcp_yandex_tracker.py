@@ -638,6 +638,10 @@ def _to_plain(value: Any) -> Any:
 # MCP server layer — FastMCP tools over the client above
 # ===========================================================================
 mcp = FastMCP("mcp-yandex-tracker")
+# FastMCP doesn't accept a version; without this the initialize handshake would
+# advertise the mcp package version instead of ours. Set it on the low-level
+# server so serverInfo reports __version__.
+mcp._mcp_server.version = __version__
 
 
 # One client per process, built lazily. The Yandex Tracker SDK opens a
@@ -711,6 +715,8 @@ def tracker_get_issue(issue_key: NonEmptyStr) -> Any:
 @tool
 def tracker_search_issues(
     query: str | None = None,
+    # `filter` shadows the builtin on purpose: the arg name mirrors the Tracker
+    # API field, and the body only forwards it.
     filter: dict | None = None,
     order: str | None = None,
     keys: list[str] | None = None,
@@ -964,6 +970,8 @@ def tracker_list_queue_tags(
 def tracker_get_changelog(
     issue_key: NonEmptyStr,
     field: Annotated[str | None, Field(description="Filter to changes of a single field id, e.g. status.")] = None,
+    # `type` shadows the builtin on purpose: it mirrors the Tracker changelog
+    # get-param name; the body forwards it as change_type.
     type: Annotated[str | None, Field(description="Filter by change type, e.g. IssueWorkflow, IssueUpdated.")] = None,
     per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
 ) -> Any:

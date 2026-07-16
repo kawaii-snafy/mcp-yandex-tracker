@@ -210,6 +210,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertIn(name, names)
 
+    async def test_initialize_advertises_our_version(self):
+        # serverInfo.version must report the module version, not the mcp package
+        # version (FastMCP defaults to the latter unless we set it explicitly).
+        opts = server.mcp._mcp_server.create_initialization_options()
+        self.assertEqual(opts.server_version, server.__version__)
+        self.assertEqual(opts.server_name, "mcp-yandex-tracker")
+
     async def test_tools_have_no_output_schema(self):
         # Token optimization: text-only responses (structured_output=False) must
         # not publish an output schema or a duplicating structuredContent block.
@@ -391,6 +398,26 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ToolError) as ctx:
             await server.mcp.call_tool("tracker_get_issue", {"issue_key": "TEST-1"})
         self.assertIn("missing token", str(ctx.exception))
+
+    async def test_stdio_transport_preserves_cyrillic(self):
+        # End-to-end guard for the UTF-8 stdio path (FastMCP's stdio_server pins
+        # UTF-8). Spawns the real server and round-trips a Cyrillic tool name
+        # through the byte transport — it must come back intact in the error
+        # message. Replaces the old hand-rolled cp1251 regression tests; needs no
+        # Tracker credentials since an unknown-tool call never reaches the API.
+        import sys
+
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        name = "задача_кириллица_проверка"
+        params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_yandex_tracker"])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(name, {})
+        self.assertTrue(result.isError)
+        self.assertIn(name, result.content[0].text)
 
 
 if __name__ == "__main__":

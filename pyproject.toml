@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-yandex-tracker"
-version = "0.6.0"
+dynamic = ["version"]
 description = "MCP stdio server for Yandex Tracker"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,3 +35,6 @@ mcp-yandex-tracker = "mcp_yandex_tracker:main"
 
 [tool.setuptools]
 py-modules = ["mcp_yandex_tracker"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mcp_yandex_tracker.__version__" }
