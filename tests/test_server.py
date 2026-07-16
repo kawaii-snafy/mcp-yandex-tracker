@@ -359,6 +359,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ToolError):
             await server.mcp.call_tool("tracker_get_issue", {})
 
+    async def test_empty_required_string_is_tool_error(self):
+        # Required string args carry min_length=1, so an empty value is rejected
+        # by validation before the handler (and before any network round-trip).
+        with self.assertRaises(ToolError):
+            await server.mcp.call_tool("tracker_get_issue", {"issue_key": ""})
+        self.assertEqual(self.fake.calls, [])
+
     async def test_invalid_per_page_is_tool_error(self):
         with self.assertRaises(ToolError):
             await server.mcp.call_tool(

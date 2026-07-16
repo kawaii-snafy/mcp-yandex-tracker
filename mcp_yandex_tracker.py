@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -645,12 +646,15 @@ mcp = FastMCP("mcp-yandex-tracker")
 # _client_factory stays swappable so tests can inject a fake client.
 _client: YandexTrackerClient | None = None
 _client_factory: Callable[[], YandexTrackerClient] = YandexTrackerClient
+_client_lock = threading.Lock()
 
 
 def get_client() -> YandexTrackerClient:
     global _client
     if _client is None:
-        _client = _client_factory()
+        with _client_lock:
+            if _client is None:
+                _client = _client_factory()
     return _client
 
 
@@ -694,9 +698,12 @@ def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
     return mcp.tool(structured_output=False)(_json_safe(fn, ToolError))
 
 
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+
+
 # --- Issues -----------------------------------------------------------------
 @tool
-def tracker_get_issue(issue_key: str) -> Any:
+def tracker_get_issue(issue_key: NonEmptyStr) -> Any:
     """Get a Yandex Tracker issue by key."""
     return get_client().get_issue(issue_key)
 
@@ -742,8 +749,8 @@ def tracker_search_issues(
 
 @tool
 def tracker_create_issue(
-    queue: str,
-    summary: str,
+    queue: NonEmptyStr,
+    summary: NonEmptyStr,
     description: str | None = None,
     fields: Annotated[dict | None, Field(description="Additional Tracker issue fields.")] = None,
 ) -> Any:
@@ -755,7 +762,7 @@ def tracker_create_issue(
 
 @tool
 def tracker_update_issue(
-    issue_key: str,
+    issue_key: NonEmptyStr,
     fields: Annotated[dict, Field(description="Fields to patch (raw Tracker API field names and values).")],
 ) -> Any:
     """Update fields on a Yandex Tracker issue.
@@ -771,21 +778,21 @@ def tracker_update_issue(
 
 # --- Comments ---------------------------------------------------------------
 @tool
-def tracker_add_comment(issue_key: str, text: str) -> Any:
+def tracker_add_comment(issue_key: NonEmptyStr, text: NonEmptyStr) -> Any:
     """Add a comment to a Yandex Tracker issue."""
     return get_client().add_comment(issue_key, text)
 
 
 @tool
-def tracker_list_comments(issue_key: str) -> Any:
+def tracker_list_comments(issue_key: NonEmptyStr) -> Any:
     """List comments for a Yandex Tracker issue."""
     return get_client().list_comments(issue_key)
 
 
 @tool
 def tracker_delete_comment(
-    issue_key: str,
-    comment_id: Annotated[str, Field(description="Comment id from tracker_list_comments.")],
+    issue_key: NonEmptyStr,
+    comment_id: Annotated[str, Field(min_length=1, description="Comment id from tracker_list_comments.")],
 ) -> Any:
     """Delete a comment from a Yandex Tracker issue by its comment id (get ids from tracker_list_comments)."""
     return get_client().delete_comment(issue_key, comment_id)
@@ -793,15 +800,15 @@ def tracker_delete_comment(
 
 # --- Transitions ------------------------------------------------------------
 @tool
-def tracker_list_transitions(issue_key: str) -> Any:
+def tracker_list_transitions(issue_key: NonEmptyStr) -> Any:
     """List available workflow transitions for a Yandex Tracker issue."""
     return get_client().list_transitions(issue_key)
 
 
 @tool
 def tracker_move_issue_status(
-    issue_key: str,
-    status: Annotated[str, Field(description="Transition id/display or destination status id/key/display.")],
+    issue_key: NonEmptyStr,
+    status: Annotated[str, Field(min_length=1, description="Transition id/display or destination status id/key/display.")],
     fields: Annotated[dict | None, Field(description="Optional fields for the transition screen, such as comment.")] = None,
 ) -> Any:
     """Move a Yandex Tracker issue to a status by matching an available transition."""
@@ -810,8 +817,8 @@ def tracker_move_issue_status(
 
 @tool
 def tracker_execute_transition(
-    issue_key: str,
-    transition_id: str,
+    issue_key: NonEmptyStr,
+    transition_id: NonEmptyStr,
     fields: dict | None = None,
 ) -> Any:
     """Execute a Yandex Tracker workflow transition."""
@@ -821,12 +828,12 @@ def tracker_execute_transition(
 # --- Links ------------------------------------------------------------------
 @tool
 def tracker_link_issues(
-    issue_key: Annotated[str, Field(description="Source issue, e.g. TEST-1.")],
+    issue_key: Annotated[str, Field(min_length=1, description="Source issue, e.g. TEST-1.")],
     relationship: Annotated[
         str,
         Field(description="Link type, e.g. relates, depends on, is dependent by, is subtask for, is parent task for, duplicates."),
     ],
-    target_issue: Annotated[str, Field(description="Issue to link to, e.g. TEST-2.")],
+    target_issue: Annotated[str, Field(min_length=1, description="Issue to link to, e.g. TEST-2.")],
 ) -> Any:
     """Create a link between two Yandex Tracker issues.
 
@@ -836,15 +843,15 @@ def tracker_link_issues(
 
 
 @tool
-def tracker_list_links(issue_key: str) -> Any:
+def tracker_list_links(issue_key: NonEmptyStr) -> Any:
     """List links of a Yandex Tracker issue (each carries an id for tracker_unlink_issues)."""
     return get_client().list_links(issue_key)
 
 
 @tool
 def tracker_unlink_issues(
-    issue_key: str,
-    link_id: Annotated[str, Field(description="Link id from tracker_list_links.")],
+    issue_key: NonEmptyStr,
+    link_id: Annotated[str, Field(min_length=1, description="Link id from tracker_list_links.")],
 ) -> Any:
     """Remove a link from a Yandex Tracker issue by its link id (get ids from tracker_list_links)."""
     return get_client().unlink_issue(issue_key, link_id)
@@ -874,7 +881,7 @@ def tracker_list_users(
 
 @tool
 def tracker_get_user(
-    login_or_uid: Annotated[str, Field(description="User login (e.g. jsmith) or numeric uid.")],
+    login_or_uid: Annotated[str, Field(min_length=1, description="User login (e.g. jsmith) or numeric uid.")],
 ) -> Any:
     """Get a single Yandex Tracker user by login or uid."""
     return get_client().get_user(login_or_uid)
@@ -919,7 +926,7 @@ def tracker_list_link_types() -> Any:
 
 @tool
 def tracker_list_queue_versions(
-    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+    queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
     """List versions defined in a specific Yandex Tracker queue."""
     return get_client().list_queue_versions(queue)
@@ -927,7 +934,7 @@ def tracker_list_queue_versions(
 
 @tool
 def tracker_list_queue_components(
-    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+    queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
     """List components defined in a specific Yandex Tracker queue."""
     return get_client().list_queue_components(queue)
@@ -935,7 +942,7 @@ def tracker_list_queue_components(
 
 @tool
 def tracker_list_queue_local_fields(
-    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+    queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
     """List local (queue-specific custom) fields of a Yandex Tracker queue.
 
@@ -946,7 +953,7 @@ def tracker_list_queue_local_fields(
 
 @tool
 def tracker_list_queue_tags(
-    queue: Annotated[str, Field(description="Queue key, e.g. TEST.")],
+    queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
     """List tags defined in a specific Yandex Tracker queue."""
     return get_client().list_queue_tags(queue)
@@ -955,7 +962,7 @@ def tracker_list_queue_tags(
 # --- Activity ---------------------------------------------------------------
 @tool
 def tracker_get_changelog(
-    issue_key: str,
+    issue_key: NonEmptyStr,
     field: Annotated[str | None, Field(description="Filter to changes of a single field id, e.g. status.")] = None,
     type: Annotated[str | None, Field(description="Filter by change type, e.g. IssueWorkflow, IssueUpdated.")] = None,
     per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
@@ -968,15 +975,15 @@ def tracker_get_changelog(
 
 
 @tool
-def tracker_list_worklog(issue_key: str) -> Any:
+def tracker_list_worklog(issue_key: NonEmptyStr) -> Any:
     """List worklog (time-tracking) records of a Yandex Tracker issue."""
     return get_client().list_worklog(issue_key)
 
 
 @tool
 def tracker_add_worklog(
-    issue_key: str,
-    duration: Annotated[str, Field(description="ISO 8601 duration, e.g. PT1H30M for 1h30m.")],
+    issue_key: NonEmptyStr,
+    duration: Annotated[str, Field(min_length=1, description="ISO 8601 duration, e.g. PT1H30M for 1h30m.")],
     comment: str | None = None,
     start: Annotated[str | None, Field(description="ISO 8601 start datetime, e.g. 2026-07-03T10:00:00.000+0000.")] = None,
 ) -> Any:
@@ -986,15 +993,15 @@ def tracker_add_worklog(
 
 # --- Checklist --------------------------------------------------------------
 @tool
-def tracker_list_checklist(issue_key: str) -> Any:
+def tracker_list_checklist(issue_key: NonEmptyStr) -> Any:
     """List checklist items of a Yandex Tracker issue."""
     return get_client().list_checklist(issue_key)
 
 
 @tool
 def tracker_add_checklist_item(
-    issue_key: str,
-    text: str,
+    issue_key: NonEmptyStr,
+    text: NonEmptyStr,
     checked: Annotated[bool, Field(description="Initial checked state.")] = False,
 ) -> Any:
     """Add a checklist item to a Yandex Tracker issue."""
@@ -1003,7 +1010,7 @@ def tracker_add_checklist_item(
 
 # --- Attachments ------------------------------------------------------------
 @tool
-def tracker_list_attachments(issue_key: str) -> Any:
+def tracker_list_attachments(issue_key: NonEmptyStr) -> Any:
     """List attachment metadata (id, name, size, url) of a Yandex Tracker issue.
 
     Use tracker_download_attachment to fetch the bytes.
@@ -1013,9 +1020,9 @@ def tracker_list_attachments(issue_key: str) -> Any:
 
 @tool
 def tracker_download_attachment(
-    issue_key: str,
-    attachment_id: Annotated[str, Field(description="Attachment id from tracker_list_attachments.")],
-    dest_dir: Annotated[str, Field(description="Absolute directory path to save the file into.")],
+    issue_key: NonEmptyStr,
+    attachment_id: Annotated[str, Field(min_length=1, description="Attachment id from tracker_list_attachments.")],
+    dest_dir: Annotated[str, Field(min_length=1, description="Absolute directory path to save the file into.")],
     filename: Annotated[str | None, Field(description="Optional override for the saved file name.")] = None,
 ) -> Any:
     """Download an issue attachment to a local directory and return the saved file path.
@@ -1028,8 +1035,8 @@ def tracker_download_attachment(
 
 @tool
 def tracker_upload_attachment(
-    issue_key: str,
-    file_path: Annotated[str, Field(description="Absolute path to the local file to upload.")],
+    issue_key: NonEmptyStr,
+    file_path: Annotated[str, Field(min_length=1, description="Absolute path to the local file to upload.")],
     filename: Annotated[str | None, Field(description="Optional name to store the attachment under in Tracker.")] = None,
 ) -> Any:
     """Upload a local file as an attachment on a Yandex Tracker issue."""
@@ -1038,8 +1045,8 @@ def tracker_upload_attachment(
 
 @tool
 def tracker_delete_attachment(
-    issue_key: str,
-    attachment_id: Annotated[str, Field(description="Attachment id from tracker_list_attachments.")],
+    issue_key: NonEmptyStr,
+    attachment_id: Annotated[str, Field(min_length=1, description="Attachment id from tracker_list_attachments.")],
 ) -> Any:
     """Delete an attachment from a Yandex Tracker issue by its attachment id (get ids from tracker_list_attachments)."""
     return get_client().delete_attachment(issue_key, attachment_id)
@@ -1066,7 +1073,7 @@ def resource(uri: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable
 
 
 @resource("tracker://issue/{key}", mime_type="application/json")
-def issue_resource(key: str) -> Any:
+def issue_resource(key: NonEmptyStr) -> Any:
     """A single Yandex Tracker issue by key (e.g. tracker://issue/TEST-123)."""
     return get_client().get_issue(key)
 

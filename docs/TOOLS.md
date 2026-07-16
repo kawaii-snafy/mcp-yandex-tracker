@@ -11,8 +11,9 @@ The canonical schemas are derived from the `@tool`-decorated functions in
 `Field` descriptions); this page is the human-readable mirror. If you change a
 signature there, update this table.
 
-Argument required-ness note: a required string that is empty (`""`) is rejected
-the same as if it were missing.
+Argument required-ness note: required string arguments carry a minimum length of
+1, so an empty value (`""`) is rejected by input validation — the same `isError`
+outcome as omitting the argument.
 
 ## Read
 
