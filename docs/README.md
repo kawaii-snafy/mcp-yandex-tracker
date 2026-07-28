@@ -1,7 +1,7 @@
 # Documentation
 
 Yandex Tracker MCP is a **stdio MCP server** that exposes Yandex Tracker issues
-to LLM agents. It is built on the official MCP Python SDK (`FastMCP`) and reaches
+to LLM agents. It is built on the official MCP Python SDK (`MCPServer`) and reaches
 Tracker through the official `yandex_tracker_client` SDK.
 
 Pick the doc that matches what you are doing:
@@ -17,7 +17,7 @@ The project [README](../README.md) has the quick-start; these docs go deeper.
 
 ## One-paragraph mental model
 
-`FastMCP` (the official MCP SDK) owns the JSON-RPC 2.0 stdio transport,
+`MCPServer` (the official MCP SDK) owns the JSON-RPC 2.0 stdio transport,
 lifecycle, and `tools/list` / `tools/call` routing — **stdout carries only
 protocol messages, logs go to stderr**. Everything lives in one module,
 `mcp_yandex_tracker.py`, split into two commented sections: an **MCP server

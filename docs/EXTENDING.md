@@ -43,7 +43,7 @@ A tool spans two edits plus tests. Follow the existing patterns.
    for bad arguments you detect yourself (it maps to a tool error, not a crash).
 
 2. **MCP server layer — add the `@tool` function.** Write a typed function named
-   `tracker_<verb>_<noun>`; FastMCP derives the `inputSchema` from its
+   `tracker_<verb>_<noun>`; MCPServer derives the `inputSchema` from its
    parameters. Required arguments have no default; optional ones default to
    `None`/a literal. Attach parameter descriptions with
    `Annotated[..., Field(description="…")]` and the tool description as the
@@ -94,9 +94,9 @@ right SDK method, and a server-level test that the tool name dispatches to it.
 - **More primitives.** Read-only context is already exposed as `@mcp.resource`
   functions under `tracker://` (issue snapshot + reference dictionaries), wrapped
   by the local `resource` helper (compact JSON + `ResourceError` mapping) — add
-  more the same way. To add templated prompts, use `@mcp.prompt()`; FastMCP
+  more the same way. To add templated prompts, use `@mcp.prompt()`; MCPServer
   surfaces them as host slash commands.
-- **Transport.** FastMCP owns JSON-RPC framing, batching, and the stdio loop.
+- **Transport.** MCPServer owns JSON-RPC framing, batching, and the stdio loop.
   There is no read loop to maintain here.
 - **Serialization edge cases.** If a new SDK return type does not expose
   `.as_dict()` and isn't a container/primitive, `_to_plain` stringifies it.

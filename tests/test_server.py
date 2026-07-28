@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from mcp.server.fastmcp.exceptions import ResourceError, ToolError
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 
 import mcp_yandex_tracker as server
 from mcp_yandex_tracker import TrackerApiError, TrackerConfigError, YandexTrackerClient
@@ -168,11 +168,12 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         server._client_factory = YandexTrackerClient
 
     async def _text(self, name, arguments):
-        content = await server.mcp.call_tool(name, arguments)
+        result = await server.mcp.call_tool(name, arguments)
         # structured_output=False makes every tool return a single text block.
-        self.assertEqual(len(content), 1)
-        self.assertEqual(content[0].type, "text")
-        return content[0].text
+        self.assertFalse(result.is_error)
+        self.assertEqual(len(result.content), 1)
+        self.assertEqual(result.content[0].type, "text")
+        return result.content[0].text
 
     # --- Discovery ---------------------------------------------------------
     async def test_exposes_all_tracker_tools(self):
@@ -212,8 +213,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_initialize_advertises_our_version(self):
         # serverInfo.version must report the module version, not the mcp package
-        # version (FastMCP defaults to the latter unless we set it explicitly).
-        opts = server.mcp._mcp_server.create_initialization_options()
+        # version (MCPServer defaults to the latter unless we set it explicitly).
+        opts = server.mcp._lowlevel_server.create_initialization_options()
         self.assertEqual(opts.server_version, server.__version__)
         self.assertEqual(opts.server_name, "mcp-yandex-tracker")
 
@@ -221,16 +222,16 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # Token optimization: text-only responses (structured_output=False) must
         # not publish an output schema or a duplicating structuredContent block.
         tools = await server.mcp.list_tools()
-        with_schema = [tool.name for tool in tools if tool.outputSchema is not None]
+        with_schema = [tool.name for tool in tools if tool.output_schema is not None]
         self.assertEqual(with_schema, [])
 
     async def test_required_arguments_are_declared(self):
         tools = {tool.name: tool for tool in await server.mcp.list_tools()}
         self.assertEqual(
-            tools["tracker_get_issue"].inputSchema.get("required"), ["issue_key"]
+            tools["tracker_get_issue"].input_schema.get("required"), ["issue_key"]
         )
         self.assertEqual(
-            tools["tracker_create_issue"].inputSchema.get("required"),
+            tools["tracker_create_issue"].input_schema.get("required"),
             ["queue", "summary"],
         )
 
@@ -324,7 +325,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     # --- Resources ---------------------------------------------------------
     async def test_resources_and_template_listed(self):
         static = {str(r.uri) for r in await server.mcp.list_resources()}
-        templates = {t.uriTemplate for t in await server.mcp.list_resource_templates()}
+        templates = {t.uri_template for t in await server.mcp.list_resource_templates()}
         self.assertEqual(
             static,
             {
@@ -350,8 +351,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fake.calls, [("list_statuses",)])
 
     async def test_resource_error_surfaces_message(self):
-        # The resource wrapper maps a domain error to ResourceError, so the read
-        # carries a clean message instead of leaking the raw internal error.
+        # The resource wrapper maps a domain error to ResourceError. mcp 2.0's
+        # own read_resource() then intentionally does not leak that message
+        # verbatim to the caller -- any non-MCPError exception, including our
+        # ResourceError, is re-wrapped into a generic "Error reading resource
+        # {uri}" message, with the original detail chained as __cause__.
         class Boom:
             def list_statuses(self):
                 raise TrackerApiError(500, "boom")
@@ -359,7 +363,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         _use_client(Boom())
         with self.assertRaises(ResourceError) as ctx:
             await server.mcp.read_resource("tracker://statuses")
-        self.assertIn("boom", str(ctx.exception))
+        self.assertIn("tracker://statuses", str(ctx.exception))
+        self.assertIn("boom", str(ctx.exception.__cause__))
 
     # --- Errors ------------------------------------------------------------
     async def test_missing_required_argument_is_tool_error(self):
@@ -400,7 +405,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("missing token", str(ctx.exception))
 
     async def test_stdio_transport_preserves_cyrillic(self):
-        # End-to-end guard for the UTF-8 stdio path (FastMCP's stdio_server pins
+        # End-to-end guard for the UTF-8 stdio path (MCPServer's stdio_server pins
         # UTF-8). Spawns the real server and round-trips a Cyrillic tool name
         # through the byte transport — it must come back intact in the error
         # message. Needs no Tracker credentials since an unknown-tool call never
@@ -421,7 +426,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(name, {})
-        self.assertTrue(result.isError)
+        self.assertTrue(result.is_error)
         self.assertIn(name, result.content[0].text)
 
 
