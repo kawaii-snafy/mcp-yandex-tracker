@@ -8,7 +8,7 @@ tools, see [TOOLS.md](TOOLS.md); to *connect* it, see [INTEGRATION.md](INTEGRATI
 The whole server is a single top-level module:
 
 ```
-mcp_yandex_tracker.py   # everything: SDK client layer + FastMCP tools + main()
+mcp_yandex_tracker.py   # everything: SDK client layer + MCPServer tools + main()
 tests/                  # unittest suite over fakes (no network)
 ```
 
@@ -16,7 +16,7 @@ Inside `mcp_yandex_tracker.py`, two clearly-commented sections:
 
 - **SDK client layer** — `YandexTrackerClient` and helpers: config, SDK calls,
   transition matching, serialization.
-- **MCP server layer** — the `FastMCP` instance, the `@tool` wrapper, the client
+- **MCP server layer** — the `MCPServer` instance, the `@tool` wrapper, the client
   lifecycle, and the 35 `@tool` functions.
 
 Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
@@ -29,11 +29,13 @@ Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
 
 The JSON-RPC framing, stdio transport (`stdio_server`, UTF-8 pinned), lifecycle
 (`initialize` handshake, capability negotiation), and `tools/list` / `tools/call`
-routing are all provided by the SDK's `FastMCP`. We do **not** hand-roll them.
+routing are all provided by the SDK's `MCPServer`. We do **not** hand-roll them.
 
-- A single module-level `mcp = FastMCP("mcp-yandex-tracker")` holds the server.
+- A single module-level `mcp = MCPServer("mcp-yandex-tracker", version=__version__)`
+  holds the server. `MCPServer` accepts a `version` kwarg directly, so
+  `serverInfo` advertises our package version instead of the `mcp` SDK's.
 - Every tool is a plain typed Python function decorated with the local `@tool`
-  wrapper (see below). FastMCP derives each tool's `inputSchema` from the
+  wrapper (see below). MCPServer derives each tool's `inputSchema` from the
   function's type hints and `Annotated[..., Field(description=...)]` metadata,
   and its description from the docstring.
 - `initialize` requires the standard MCP handshake before any `tools/call` —
@@ -48,7 +50,7 @@ handler uses. It does two jobs:
 - **Serialize once, compact.** The handler returns the raw client payload; the
   wrapper runs it through `_dump` (`json.dumps(..., ensure_ascii=False,
   separators=(",", ":"))`) into a single `TextContent` block.
-  `structured_output=False` tells FastMCP not to also emit a duplicating
+  `structured_output=False` tells MCPServer not to also emit a duplicating
   `structuredContent` block or an output schema — this keeps responses
   token-lean and Cyrillic intact.
 - **Map domain errors.** `TrackerApiError`, `TrackerConfigError`, and
@@ -74,7 +76,7 @@ read-only context under the `tracker://` scheme: one template,
 (`tracker://statuses`, `priorities`, `issue-types`, `fields`, `link-types`,
 `queues`). They go through the same `get_client()` and serialize to compact
 JSON (`application/json`) via the local `resource` wrapper. (On a failed read the
-`ResourceError` a client sees is produced by FastMCP's resource path, which
+`ResourceError` a client sees is produced by MCPServer's resource path, which
 re-wraps any handler error — the wrapper's own error mapping is just parity with
 the tool path; its real job here is the compact serialization.)
 
@@ -105,10 +107,10 @@ to the same data, so resources are additive, never a replacement.
 
 ## Design constraints
 
-- **Official SDKs only.** The MCP layer is the `mcp` SDK's `FastMCP`; all Tracker
+- **Official SDKs only.** The MCP layer is the `mcp` SDK's `MCPServer`; all Tracker
   access goes through `yandex_tracker_client` objects. No `requests`/`urllib`/raw
   HTTP for Tracker behavior — see [EXTENDING.md](EXTENDING.md).
-- **stdout is protocol-only.** FastMCP writes JSON-RPC to stdout and routes its
+- **stdout is protocol-only.** MCPServer writes JSON-RPC to stdout and routes its
   own logging to stderr. Anything you print to stdout corrupts the MCP stream.
 - **Minimal dependencies.** Runtime dependencies are `mcp` and the Tracker SDK.
 - **Token-lean responses.** Tools return a single compact-JSON text block

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A single-file **stdio MCP server** that exposes Yandex Tracker to LLM agents. It
-is built on the official MCP Python SDK (`FastMCP`) and reaches Tracker through
+is built on the official MCP Python SDK (`MCPServer`) and reaches Tracker through
 the official `yandex_tracker_client` SDK. There is no HTTP/SSE transport — one
 process serves one client over stdin/stdout.
 
@@ -51,12 +51,12 @@ as a clean tool error, not a crash. Optional: `YANDEX_TRACKER_AUTH_SCHEME`
 ## Architecture
 
 Everything is one module, `mcp_yandex_tracker.py`, split into two
-clearly-commented sections. `FastMCP` owns the JSON-RPC framing, stdio
+clearly-commented sections. `MCPServer` owns the JSON-RPC framing, stdio
 transport, UTF-8, lifecycle, and `tools/list` / `tools/call` routing — none of
 that is hand-rolled here.
 
-- **MCP server layer** — the `mcp = FastMCP(...)` instance and 35
-  `@tool`-decorated typed functions named `tracker_*`. FastMCP derives each
+- **MCP server layer** — the `mcp = MCPServer(...)` instance and 35
+  `@tool`-decorated typed functions named `tracker_*`. MCPServer derives each
   tool's input schema from the function's type hints and
   `Annotated[..., Field(description=...)]` metadata, and its description from the
   docstring. Each tool body just calls a `YandexTrackerClient` method and
@@ -91,7 +91,7 @@ Two cross-cutting mechanisms to know before editing:
   transitions). Do **not** add `requests`/`urllib`/raw HTTP or ad-hoc REST
   wrappers for Tracker behavior. Runtime deps stay at `mcp` +
   `yandex_tracker_client`.
-- **stdout is protocol-only.** FastMCP writes JSON-RPC to stdout and logs to
+- **stdout is protocol-only.** MCPServer writes JSON-RPC to stdout and logs to
   stderr. Never `print()` to stdout — it corrupts the MCP stream.
 - **Keep `docs/TOOLS.md` in sync** with the `@tool` signatures when you change a
   tool.
