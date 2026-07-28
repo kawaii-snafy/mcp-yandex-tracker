@@ -18,7 +18,7 @@ from pydantic import Field
 # dynamic version via AST, no import) as the package version. A computed
 # expression would force setuptools to import this module at build time, pulling
 # in the runtime deps (mcp, pydantic, …).
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 
 # ===========================================================================
