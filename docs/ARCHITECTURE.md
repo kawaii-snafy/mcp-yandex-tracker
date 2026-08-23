@@ -16,8 +16,8 @@ Inside `mcp_yandex_tracker.py`, two clearly-commented sections:
 
 - **SDK client layer** — `YandexTrackerClient` and helpers: config, SDK calls,
   transition matching, serialization.
-- **MCP server layer** — the `MCPServer` instance, the `@tool` wrapper, the client
-  lifecycle, and the 35 `@tool` functions.
+- **MCP server layer** — the `MCPServer` instance, the three `@*_tool` wrappers,
+  the client lifecycle, and the 38 tool functions.
 
 Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
 
@@ -34,18 +34,25 @@ routing are all provided by the SDK's `MCPServer`. We do **not** hand-roll them.
 - A single module-level `mcp = MCPServer("mcp-yandex-tracker", version=__version__)`
   holds the server. `MCPServer` accepts a `version` kwarg directly, so
   `serverInfo` advertises our package version instead of the `mcp` SDK's.
-- Every tool is a plain typed Python function decorated with the local `@tool`
-  wrapper (see below). MCPServer derives each tool's `inputSchema` from the
+- Every tool is a plain typed Python function decorated with one of the three
+  local `@*_tool` wrappers (see below). MCPServer derives each tool's `inputSchema` from the
   function's type hints and `Annotated[..., Field(description=...)]` metadata,
   and its description from the docstring.
 - `initialize` requires the standard MCP handshake before any `tools/call` —
   the SDK enforces this (a bare `tools/list` before `initialize` returns
   `-32602`).
 
-### The `@tool` wrapper (MCP server layer)
+### The `@*_tool` wrappers (MCP server layer)
 
-`tool` is a thin decorator around `mcp.tool(structured_output=False)` that every
-handler uses. It does two jobs:
+`_tool(annotations)` builds a thin decorator around
+`mcp.tool(structured_output=False, annotations=...)`, and every handler uses one
+of the three it produces — `read_tool`, `additive_tool`, `destructive_tool`.
+Picking one *is* how a tool declares its MCP annotations; there is no
+unannotated flavour. The wrapper does three jobs:
+
+- **Declare what the tool does.** `readOnlyHint` on the 22 lookups is what lets
+  a host auto-approve them instead of prompting per call; `destructiveHint`
+  separates the 6 additive writes from the 10 that overwrite or remove.
 
 - **Serialize once, compact.** The handler returns the raw client payload; the
   wrapper runs it through `_dump` (`json.dumps(..., ensure_ascii=False,
@@ -115,7 +122,13 @@ to the same data, so resources are additive, never a replacement.
 - **Minimal dependencies.** Runtime dependencies are `mcp` and the Tracker SDK.
 - **Token-lean responses.** Tools return a single compact-JSON text block
   (`structured_output=False`); no output schema, no duplicating
-  `structuredContent`.
+  `structuredContent`. On top of that: transport noise (`self`, `cloudUid`,
+  `passportUid`) is stripped recursively by `_to_plain`, reads return a compact
+  projection, and writes return a receipt rather than the full entity.
+- **No unbounded iteration.** Every Tracker collection is cursor-paginated and
+  its iterator follows each `next` link to exhaustion, so `list(collection)` is
+  an unbounded fetch. Every call site goes through `_take(collection, limit)`
+  instead — see [EXTENDING.md](EXTENDING.md).
 - **Testability by injection.** The client singleton is built through
   `_client_factory`, and `YandexTrackerClient` takes a `tracker_client` /
   `tracker_client_factory`, so the whole stack runs against fakes with no

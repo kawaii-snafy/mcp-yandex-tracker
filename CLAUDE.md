@@ -55,12 +55,13 @@ clearly-commented sections. `MCPServer` owns the JSON-RPC framing, stdio
 transport, UTF-8, lifecycle, and `tools/list` / `tools/call` routing — none of
 that is hand-rolled here.
 
-- **MCP server layer** — the `mcp = MCPServer(...)` instance and 35
-  `@tool`-decorated typed functions named `tracker_*`. MCPServer derives each
+- **MCP server layer** — the `mcp = MCPServer(...)` instance and 38
+  `@read_tool` / `@additive_tool` / `@destructive_tool`-decorated typed functions
+  named `tracker_*`. MCPServer derives each
   tool's input schema from the function's type hints and
   `Annotated[..., Field(description=...)]` metadata, and its description from the
   docstring. Each tool body just calls a `YandexTrackerClient` method and
-  returns the raw payload. A few `@mcp.resource("tracker://...")` functions sit
+  returns a projected payload. A few `@mcp.resource("tracker://...")` functions sit
   alongside the tools (issue snapshot + reference dictionaries) as a *user*-facing
   `@`-mention surface — additive context, not a replacement for the tools the
   agent calls autonomously.
@@ -71,7 +72,14 @@ that is hand-rolled here.
 
 Two cross-cutting mechanisms to know before editing:
 
-- **The `@tool` wrapper** (not `mcp.tool` directly). It serializes the handler's
+- **The three `@*_tool` wrappers** (not `mcp.tool` directly), built by `_tool`.
+  Which one you pick is the tool's MCP `annotations`: `@read_tool` for a lookup
+  (`readOnlyHint`, what lets a host auto-approve it), `@additive_tool` for a
+  write that only adds, `@destructive_tool` for one that overwrites or removes —
+  which by the spec's own line covers patches and status transitions, not just
+  deletes. There is no unannotated flavour, and `test_every_tool_declares_what_it_does`
+  fails on any tool missing from its three explicit sets. The wrapper then
+  serializes the handler's
   return value to a single compact-JSON `TextContent` via
   `structured_output=False` — this is deliberate: it keeps responses token-lean
   (no duplicating `structuredContent`, no output schema) and Cyrillic intact. It
@@ -93,14 +101,26 @@ Two cross-cutting mechanisms to know before editing:
   `yandex_tracker_client`.
 - **stdout is protocol-only.** MCPServer writes JSON-RPC to stdout and logs to
   stderr. Never `print()` to stdout — it corrupts the MCP stream.
-- **Keep `docs/TOOLS.md` in sync** with the `@tool` signatures when you change a
+- **No unbounded iteration.** Tracker collections are cursor-paginated and
+  iterating one follows every `next` link to exhaustion, so `list(collection)`
+  is an unbounded fetch (`list(client.users.get_all())` walks the whole
+  directory). Every call site uses `_take(collection, limit)`: a caller-supplied
+  `limit` (`_DEFAULT_LIMIT`, 50) for open-ended collections, `_DICTIONARY_LIMIT`
+  (500) as a runaway guard for reference dictionaries, which must not be
+  silently truncated.
+- **Project every response.** Reads return a compact projection, writes return a
+  receipt — use `_slim_ref` / `_project` / `_slim_issue` / `_issue_receipt` /
+  `_slim_link`. Add a `full: bool = False` passthrough only where the untrimmed
+  object is content a caller might genuinely need; a write receipt does not need
+  one.
+- **Keep `docs/TOOLS.md` in sync** with the tool signatures when you change a
   tool.
 
 ## Adding a tool
 
 Add a method to `YandexTrackerClient` (SDK work inside a `_call_sdk` closure,
-result wrapped in `_to_plain`), then a `@tool`-decorated typed function that
-calls it, then document it in `docs/TOOLS.md` and cover it in
+result wrapped in `_to_plain`), then a typed function decorated with whichever of
+`@read_tool` / `@additive_tool` / `@destructive_tool` describes it, then then document it in `docs/TOOLS.md` and cover it in
 `tests/test_client.py` (SDK-level) and `tests/test_server.py`
 (`mcp.call_tool(...)` level). See `docs/EXTENDING.md` for the full pattern.
 

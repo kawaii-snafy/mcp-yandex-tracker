@@ -23,17 +23,21 @@ class FakeClient:
         self.calls.append(("create_issue", kwargs))
         return {"key": "TEST-2"}
 
-    def update_issue(self, issue_key, fields):
-        self.calls.append(("update_issue", issue_key, fields))
+    def update_issue(self, issue_key, fields, full=False):
+        self.calls.append(("update_issue", issue_key, fields, full))
         return {"key": issue_key, **fields}
 
     def add_comment(self, issue_key, text):
         self.calls.append(("add_comment", issue_key, text))
         return {"id": 1, "text": text}
 
-    def list_comments(self, issue_key):
-        self.calls.append(("list_comments", issue_key))
-        return [{"id": 1}]
+    def list_comments(self, issue_key, limit=50):
+        self.calls.append(("list_comments", issue_key, limit))
+        return [{"id": 1, "text": "hi"}]
+
+    def update_comment(self, issue_key, comment_id, text):
+        self.calls.append(("update_comment", issue_key, comment_id, text))
+        return {"id": comment_id}
 
     def delete_comment(self, issue_key, comment_id):
         self.calls.append(("delete_comment", issue_key, comment_id))
@@ -55,20 +59,20 @@ class FakeClient:
         self.calls.append(("link_issue", issue_key, relationship, target_issue))
         return {"linked": target_issue}
 
-    def list_links(self, issue_key):
-        self.calls.append(("list_links", issue_key))
+    def list_links(self, issue_key, limit=50, full=False):
+        self.calls.append(("list_links", issue_key, limit, full))
         return [{"id": "100"}]
 
     def unlink_issue(self, issue_key, link_id):
         self.calls.append(("unlink_issue", issue_key, link_id))
         return {"deleted": link_id}
 
-    def list_queues(self):
-        self.calls.append(("list_queues",))
+    def list_queues(self, limit=50):
+        self.calls.append(("list_queues", limit))
         return [{"key": "TEST"}]
 
-    def list_users(self, email=None, group=None, per_page=None):
-        self.calls.append(("list_users", email, group, per_page))
+    def list_users(self, email=None, group=None, limit=50):
+        self.calls.append(("list_users", email, group, limit))
         return [{"id": "user1"}]
 
     def get_user(self, login_or_uid):
@@ -115,28 +119,36 @@ class FakeClient:
         self.calls.append(("list_queue_tags", queue))
         return ["backend", "urgent"]
 
-    def get_changelog(self, issue_key, field=None, change_type=None, per_page=None):
-        self.calls.append(("get_changelog", issue_key, field, change_type, per_page))
+    def get_changelog(self, issue_key, field=None, change_type=None, limit=50):
+        self.calls.append(("get_changelog", issue_key, field, change_type, limit))
         return [{"id": "cl1"}]
 
-    def list_worklog(self, issue_key):
-        self.calls.append(("list_worklog", issue_key))
+    def list_worklog(self, issue_key, limit=50):
+        self.calls.append(("list_worklog", issue_key, limit))
         return [{"id": "wl1"}]
 
     def add_worklog(self, issue_key, duration, comment=None, start=None):
         self.calls.append(("add_worklog", issue_key, duration, comment, start))
         return {"id": "wl", "duration": duration}
 
-    def list_checklist(self, issue_key):
-        self.calls.append(("list_checklist", issue_key))
+    def list_checklist(self, issue_key, limit=50):
+        self.calls.append(("list_checklist", issue_key, limit))
         return [{"id": "ci1"}]
 
     def add_checklist_item(self, issue_key, text, checked=False):
         self.calls.append(("add_checklist_item", issue_key, text, checked))
         return {"id": "ci", "text": text}
 
-    def list_attachments(self, issue_key):
-        self.calls.append(("list_attachments", issue_key))
+    def update_checklist_item(self, issue_key, item_id, text=None, checked=None):
+        self.calls.append(("update_checklist_item", issue_key, item_id, text, checked))
+        return {"id": item_id, "checked": checked}
+
+    def delete_checklist_item(self, issue_key, item_id):
+        self.calls.append(("delete_checklist_item", issue_key, item_id))
+        return {"deleted": item_id, "issue": issue_key}
+
+    def list_attachments(self, issue_key, limit=50):
+        self.calls.append(("list_attachments", issue_key, limit))
         return [{"id": "att1"}]
 
     def download_attachment(self, issue_key, attachment_id, dest_dir, filename=None):
@@ -179,7 +191,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_exposes_all_tracker_tools(self):
         tools = await server.mcp.list_tools()
         names = {tool.name for tool in tools}
-        self.assertEqual(len(tools), 35)
+        self.assertEqual(len(tools), 38)
         for name in (
             "tracker_get_issue",
             "tracker_search_issues",
@@ -199,6 +211,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             "tracker_add_worklog",
             "tracker_list_checklist",
             "tracker_add_checklist_item",
+            "tracker_update_checklist_item",
+            "tracker_delete_checklist_item",
+            "tracker_update_comment",
             "tracker_list_attachments",
             "tracker_download_attachment",
             "tracker_upload_attachment",
@@ -217,6 +232,60 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         opts = server.mcp._lowlevel_server.create_initialization_options()
         self.assertEqual(opts.server_version, server.__version__)
         self.assertEqual(opts.server_name, "mcp-yandex-tracker")
+
+    async def test_every_tool_declares_what_it_does(self):
+        # Spelled out in full on purpose: a new tool cannot be added without
+        # consciously placing it in one of these three buckets, because an
+        # unlisted name fails here rather than silently defaulting to
+        # "may destroy things".
+        read_only = {
+            "tracker_get_issue", "tracker_search_issues", "tracker_list_comments",
+            "tracker_list_transitions", "tracker_list_links", "tracker_list_queues",
+            "tracker_list_users", "tracker_get_user", "tracker_get_current_user",
+            "tracker_list_statuses", "tracker_list_issue_types",
+            "tracker_list_priorities", "tracker_list_fields",
+            "tracker_list_link_types", "tracker_list_queue_versions",
+            "tracker_list_queue_components", "tracker_list_queue_local_fields",
+            "tracker_list_queue_tags", "tracker_get_changelog",
+            "tracker_list_worklog", "tracker_list_checklist",
+            "tracker_list_attachments",
+        }
+        additive = {
+            "tracker_create_issue", "tracker_add_comment", "tracker_add_worklog",
+            "tracker_add_checklist_item", "tracker_link_issues",
+            "tracker_upload_attachment",
+        }
+        destructive = {
+            "tracker_update_issue", "tracker_move_issue_status",
+            "tracker_execute_transition", "tracker_delete_comment",
+            "tracker_update_comment", "tracker_unlink_issues",
+            "tracker_update_checklist_item", "tracker_delete_checklist_item",
+            "tracker_delete_attachment",
+            # Overwrites whatever local file already sits at dest_dir/name.
+            "tracker_download_attachment",
+        }
+
+        buckets = {"read": set(), "additive": set(), "destructive": set()}
+        for tool in await server.mcp.list_tools():
+            annotations = tool.annotations
+            self.assertIsNotNone(annotations, f"{tool.name} carries no annotations")
+            if annotations.read_only_hint:
+                buckets["read"].add(tool.name)
+            elif annotations.destructive_hint:
+                buckets["destructive"].add(tool.name)
+            else:
+                buckets["additive"].add(tool.name)
+
+        self.assertEqual(buckets["read"], read_only)
+        self.assertEqual(buckets["additive"], additive)
+        self.assertEqual(buckets["destructive"], destructive)
+
+    async def test_read_only_hint_is_emitted_on_the_wire(self):
+        # readOnlyHint is the hint that earns its keep — it is what lets a host
+        # auto-approve a lookup instead of prompting for every single one.
+        tools = {tool.name: tool for tool in await server.mcp.list_tools()}
+        payload = tools["tracker_get_issue"].model_dump(by_alias=True, exclude_none=True)
+        self.assertEqual(payload["annotations"], {"readOnlyHint": True})
 
     async def test_tools_have_no_output_schema(self):
         # Token optimization: text-only responses (structured_output=False) must
@@ -241,6 +310,30 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"key":"TEST-1"', text)
         self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
 
+    async def test_update_issue_receipt_through_the_whole_stack(self):
+        # The other routing tests stop at a fake client, so the projection layer
+        # never runs. Drive a real YandexTrackerClient over a fake SDK once, so
+        # tool -> client -> projection -> compact JSON is covered end to end.
+        from test_client import FULL_ISSUE_PAYLOAD, FakeIssue, FakeSdkClient
+
+        issue = FakeIssue("TEST-1")
+        issue.update = lambda **kwargs: dict(FULL_ISSUE_PAYLOAD)
+        _use_client(YandexTrackerClient(tracker_client=FakeSdkClient(issue)))
+
+        payload = json.loads(
+            await self._text(
+                "tracker_update_issue",
+                {"issue_key": "TEST-1", "fields": {"boardStatus": "review"}},
+            )
+        )
+
+        self.assertEqual(payload["key"], "TEST-1")
+        self.assertEqual(payload["version"], 12)
+        self.assertEqual(payload["boardStatus"], "review")
+        self.assertEqual(payload["status"]["display"], "В работе")
+        self.assertNotIn("description", payload)
+        self.assertNotIn("self", payload)
+
     async def test_tools_route_to_client(self):
         cases = [
             ("tracker_get_user", {"login_or_uid": "jsmith"}, ("get_user", "jsmith")),
@@ -263,13 +356,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             ("tracker_list_queue_tags", {"queue": "TEST"}, ("list_queue_tags", "TEST")),
             (
                 "tracker_list_users",
-                {"email": "a@b.c", "group": "42", "per_page": 50},
-                ("list_users", "a@b.c", "42", 50),
+                {"email": "a@b.c", "group": "42", "limit": 25},
+                ("list_users", "a@b.c", "42", 25),
             ),
             (
                 "tracker_get_changelog",
                 {"issue_key": "TEST-1", "field": "status", "type": "IssueWorkflow"},
-                ("get_changelog", "TEST-1", "status", "IssueWorkflow", None),
+                ("get_changelog", "TEST-1", "status", "IssueWorkflow", 50),
             ),
             (
                 "tracker_link_issues",
@@ -285,6 +378,41 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 "tracker_list_queue_versions",
                 {"queue": "TEST"},
                 ("list_queue_versions", "TEST"),
+            ),
+            (
+                "tracker_update_comment",
+                {"issue_key": "TEST-1", "comment_id": "5", "text": "правка"},
+                ("update_comment", "TEST-1", "5", "правка"),
+            ),
+            (
+                "tracker_update_checklist_item",
+                {"issue_key": "TEST-1", "item_id": "ci1", "checked": True},
+                ("update_checklist_item", "TEST-1", "ci1", None, True),
+            ),
+            (
+                "tracker_delete_checklist_item",
+                {"issue_key": "TEST-1", "item_id": "ci1"},
+                ("delete_checklist_item", "TEST-1", "ci1"),
+            ),
+            (
+                "tracker_list_comments",
+                {"issue_key": "TEST-1"},
+                ("list_comments", "TEST-1", 50),
+            ),
+            (
+                "tracker_list_links",
+                {"issue_key": "TEST-1", "limit": 5, "full": True},
+                ("list_links", "TEST-1", 5, True),
+            ),
+            (
+                "tracker_list_attachments",
+                {"issue_key": "TEST-1", "limit": 3},
+                ("list_attachments", "TEST-1", 3),
+            ),
+            (
+                "tracker_update_issue",
+                {"issue_key": "TEST-1", "fields": {"summary": "new"}},
+                ("update_issue", "TEST-1", {"summary": "new"}, False),
             ),
             (
                 "tracker_move_issue_status",
@@ -317,10 +445,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_cyrillic_text_survives_round_trip(self):
         # ensure_ascii=False keeps Cyrillic intact in the response payload.
         text = "клик по лого → сброс дашборда «на главную»"
-        result = await self._text(
-            "tracker_add_comment", {"issue_key": "TEST-1", "text": text}
-        )
-        self.assertEqual(json.loads(result)["text"], text)
+        self.fake.list_comments = lambda issue_key, limit=50: [{"id": 1, "text": text}]
+        result = await self._text("tracker_list_comments", {"issue_key": "TEST-1"})
+        self.assertEqual(json.loads(result)[0]["text"], text)
 
     # --- Resources ---------------------------------------------------------
     async def test_resources_and_template_listed(self):

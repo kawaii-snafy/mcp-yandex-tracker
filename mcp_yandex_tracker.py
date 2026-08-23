@@ -6,19 +6,20 @@ import functools
 import json
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
+from mcp.types import ToolAnnotations
 from pydantic import Field
 
 # Keep this a plain string literal: pyproject reads it statically (setuptools
 # dynamic version via AST, no import) as the package version. A computed
 # expression would force setuptools to import this module at build time, pulling
 # in the runtime deps (mcp, pydantic, …).
-__version__ = "0.6.2"
+__version__ = "0.8.0"
 
 
 # ===========================================================================
@@ -70,6 +71,19 @@ class TrackerConfig:
             auth_scheme=values.get("YANDEX_TRACKER_AUTH_SCHEME", cls.auth_scheme),
             timeout=float(values.get("YANDEX_TRACKER_TIMEOUT", cls.timeout)),
         )
+
+
+# Hard caps on how many items a list call returns. Every Tracker collection is
+# cursor-paginated and its iterator follows each "next" link to exhaustion, so
+# materializing one with list() is unbounded by construction: a call to
+# list_comments on a busy issue, or list_users on a large org, walks every page.
+# Each call site goes through _take instead, which stops at the cap and never
+# fetches the page after it.
+_DEFAULT_LIMIT = 50
+# Reference dictionaries are the exception: silently truncating one would make
+# the agent conclude a status or field does not exist. This is a runaway guard,
+# not a page size — high enough that a real organization never reaches it.
+_DICTIONARY_LIMIT = 500
 
 
 class YandexTrackerClient:
@@ -145,34 +159,59 @@ class YandexTrackerClient:
         summary: str,
         description: str | None = None,
         fields: dict[str, Any] | None = None,
+        full: bool = False,
     ) -> Any:
         payload = {"queue": queue, "summary": summary}
         if description is not None:
             payload["description"] = description
         if fields:
             payload.update(fields)
-        return _to_plain(self._call_sdk(lambda client: client.issues.create(**payload)))
+        created = _to_plain(self._call_sdk(lambda client: client.issues.create(**payload)))
+        if full:
+            return created
+        # Echo the extra fields (custom values the server may have normalized),
+        # not summary/description — the caller just sent those verbatim.
+        return _issue_receipt(created, fields or ())
 
-    def update_issue(self, issue_key: str, fields: dict[str, Any]) -> Any:
+    def update_issue(
+        self,
+        issue_key: str,
+        fields: dict[str, Any],
+        full: bool = False,
+    ) -> Any:
         def update(client: Any) -> Any:
             issue = client.issues[issue_key]
             return issue.update(**fields)
 
-        return _to_plain(self._call_sdk(update))
+        updated = _to_plain(self._call_sdk(update))
+        return updated if full else _issue_receipt(updated, fields)
 
     def add_comment(self, issue_key: str, text: str) -> Any:
         def add(client: Any) -> Any:
             issue = client.issues[issue_key]
             return issue.comments.create(text=text)
 
-        return _to_plain(self._call_sdk(add))
+        # Write receipt only: the response echoes the text the caller just sent
+        # plus a full user object, and neither tells the agent anything new.
+        return _project(_to_plain(self._call_sdk(add)), _COMMENT_RECEIPT_FIELDS)
 
-    def list_comments(self, issue_key: str) -> Any:
+    def list_comments(self, issue_key: str, limit: int = _DEFAULT_LIMIT) -> Any:
         def get_all(client: Any) -> Any:
             issue = client.issues[issue_key]
-            return list(issue.comments.get_all())
+            return _take(issue.comments.get_all(), limit)
 
         return _to_plain(self._call_sdk(get_all))
+
+    def update_comment(self, issue_key: str, comment_id: str, text: str) -> Any:
+        def update(client: Any) -> Any:
+            comment = client.issues[issue_key].comments[str(comment_id)]
+            return comment.update(text=text)
+
+        # Receipt only: the caller sent the text, so what is worth returning is
+        # that the edit landed and who Tracker recorded for it.
+        return _project(
+            _to_plain(self._call_sdk(update)), _COMMENT_EDIT_RECEIPT_FIELDS
+        )
 
     def delete_comment(self, issue_key: str, comment_id: str) -> Any:
         def delete(client: Any) -> Any:
@@ -185,7 +224,7 @@ class YandexTrackerClient:
     def list_transitions(self, issue_key: str) -> Any:
         def get_all(client: Any) -> Any:
             issue = client.issues[issue_key]
-            return list(issue.transitions.get_all())
+            return _take(issue.transitions.get_all(), _DICTIONARY_LIMIT)
 
         return _to_plain(self._call_sdk(get_all))
 
@@ -197,7 +236,7 @@ class YandexTrackerClient:
     ) -> Any:
         def move(client: Any) -> Any:
             issue = client.issues[issue_key]
-            transitions = list(issue.transitions.get_all())
+            transitions = _take(issue.transitions.get_all(), _DICTIONARY_LIMIT)
             transition = self._select_transition(transitions, status)
             return transition.execute(**(fields or {}))
 
@@ -225,20 +264,28 @@ class YandexTrackerClient:
             issue = client.issues[issue_key]
             return issue.links.create(relationship=relationship, issue=target_issue)
 
-        return _to_plain(self._call_sdk(link))
+        return _slim_link(_to_plain(self._call_sdk(link)))
 
-    def list_links(self, issue_key: str) -> Any:
+    def list_links(
+        self,
+        issue_key: str,
+        limit: int = _DEFAULT_LIMIT,
+        full: bool = False,
+    ) -> Any:
         def get_all(client: Any) -> Any:
             issue = client.issues[issue_key]
-            return list(issue.links)
+            return _take(issue.links, limit)
 
-        return _to_plain(self._call_sdk(get_all))
+        links = _to_plain(self._call_sdk(get_all))
+        return links if full else _slim_link(links)
 
     def unlink_issue(self, issue_key: str, link_id: str) -> Any:
         def unlink(client: Any) -> Any:
             issue = client.issues[issue_key]
             target = str(link_id)
-            for link in issue.links:
+            # A lookup, not a listing — but issue.links is still a paginated
+            # collection, so bound the scan like every other call site.
+            for link in _take(issue.links, _DICTIONARY_LIMIT):
                 if str(_field(link, "id")) == target:
                     client._connection.delete(path=link._path)
                     return {"deleted": target, "issue": issue_key}
@@ -246,26 +293,28 @@ class YandexTrackerClient:
 
         return _to_plain(self._call_sdk(unlink))
 
-    def list_queues(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.queues.get_all())))
+    def list_queues(self, limit: int = _DEFAULT_LIMIT) -> Any:
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.queues.get_all(), limit))
+        )
 
     def list_users(
         self,
         email: str | None = None,
         group: str | None = None,
-        per_page: int | None = None,
+        limit: int = _DEFAULT_LIMIT,
     ) -> Any:
         # email (exact match) and group are the server-side filters the Tracker
         # users endpoint supports; the SDK passes them through get_all(**params).
-        params: dict[str, Any] = {}
+        # perPage is only the page size — on its own the iterator still walks the
+        # whole directory — so _take is what turns `limit` into a real cap.
+        params: dict[str, Any] = {"perPage": min(limit, 100)}
         if email is not None:
             params["email"] = email
         if group is not None:
             params["group"] = group
-        if per_page is not None:
-            params["perPage"] = per_page
         return _to_plain(
-            self._call_sdk(lambda client: list(client.users.get_all(**params)))
+            self._call_sdk(lambda client: _take(client.users.get_all(**params), limit))
         )
 
     def get_user(self, login_or_uid: str) -> Any:
@@ -277,33 +326,49 @@ class YandexTrackerClient:
         return _to_plain(self._call_sdk(lambda client: client.myself))
 
     def list_statuses(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.statuses.get_all())))
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.statuses.get_all(), _DICTIONARY_LIMIT))
+        )
 
     def list_issue_types(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.issue_types.get_all())))
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.issue_types.get_all(), _DICTIONARY_LIMIT))
+        )
 
     def list_priorities(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.priorities.get_all())))
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.priorities.get_all(), _DICTIONARY_LIMIT))
+        )
 
     def list_fields(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.fields.get_all())))
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.fields.get_all(), _DICTIONARY_LIMIT))
+        )
 
     def list_link_types(self) -> Any:
-        return _to_plain(self._call_sdk(lambda client: list(client.linktypes.get_all())))
+        return _to_plain(
+            self._call_sdk(lambda client: _take(client.linktypes.get_all(), _DICTIONARY_LIMIT))
+        )
 
     def list_queue_versions(self, queue: str) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.queues[queue].versions))
+            self._call_sdk(
+                lambda client: _take(client.queues[queue].versions, _DICTIONARY_LIMIT)
+            )
         )
 
     def list_queue_components(self, queue: str) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.queues[queue].components))
+            self._call_sdk(
+                lambda client: _take(client.queues[queue].components, _DICTIONARY_LIMIT)
+            )
         )
 
     def list_queue_local_fields(self, queue: str) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.queues[queue].local_fields))
+            self._call_sdk(
+                lambda client: _take(client.queues[queue].local_fields, _DICTIONARY_LIMIT)
+            )
         )
 
     def list_queue_tags(self, queue: str) -> Any:
@@ -320,26 +385,25 @@ class YandexTrackerClient:
         issue_key: str,
         field: str | None = None,
         change_type: str | None = None,
-        per_page: int | None = None,
+        limit: int = _DEFAULT_LIMIT,
     ) -> Any:
-        # field/type filters and perPage are native changelog get-params; the SDK
-        # iterator handles cursor pagination when the result is materialized.
-        params: dict[str, Any] = {}
+        # field/type are native changelog get-params. perPage is only the page
+        # size — the SDK iterator follows every cursor past it — so _take is what
+        # bounds the result.
+        params: dict[str, Any] = {"perPage": min(limit, 100)}
         if field is not None:
             params["field"] = field
         if change_type is not None:
             params["type"] = change_type
-        if per_page is not None:
-            params["perPage"] = per_page
 
         def changelog(client: Any) -> Any:
-            return list(client.issues[issue_key].changelog.get_all(**params))
+            return _take(client.issues[issue_key].changelog.get_all(**params), limit)
 
         return _to_plain(self._call_sdk(changelog))
 
-    def list_worklog(self, issue_key: str) -> Any:
+    def list_worklog(self, issue_key: str, limit: int = _DEFAULT_LIMIT) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.issues[issue_key].worklog))
+            self._call_sdk(lambda client: _take(client.issues[issue_key].worklog, limit))
         )
 
     def add_worklog(
@@ -358,23 +422,62 @@ class YandexTrackerClient:
                 payload["start"] = start
             return issue.worklog.create(**payload)
 
-        return _to_plain(self._call_sdk(add))
+        # Write receipt only: the full record embeds the whole parent issue.
+        return _project(_to_plain(self._call_sdk(add)), _WORKLOG_RECEIPT_FIELDS)
 
-    def list_checklist(self, issue_key: str) -> Any:
+    def list_checklist(self, issue_key: str, limit: int = _DEFAULT_LIMIT) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.issues[issue_key].checklist_items))
+            self._call_sdk(
+                lambda client: _take(client.issues[issue_key].checklist_items, limit)
+            )
         )
 
     def add_checklist_item(self, issue_key: str, text: str, checked: bool = False) -> Any:
         def add(client: Any) -> Any:
             issue = client.issues[issue_key]
-            return issue.checklist_items.create(text=text, checked=checked)
+            created = issue.checklist_items.create(text=text, checked=checked)
+            # The SDK's checklistItems.create() discards the API response (it
+            # never returns super().create(...)), which would leave the caller
+            # with a bare null and no id for the item it just added. Re-read the
+            # checklist in that case.
+            if created is None:
+                return _take(issue.checklist_items, _DICTIONARY_LIMIT)
+            return created
 
-        return _to_plain(self._call_sdk(add))
+        return _project(_to_plain(self._call_sdk(add)), _SLIM_CHECKLIST_FIELDS)
 
-    def list_attachments(self, issue_key: str) -> Any:
+    def update_checklist_item(
+        self,
+        issue_key: str,
+        item_id: str,
+        text: str | None = None,
+        checked: bool | None = None,
+    ) -> Any:
+        payload: dict[str, Any] = {}
+        if text is not None:
+            payload["text"] = text
+        if checked is not None:
+            payload["checked"] = checked
+        if not payload:
+            raise ValueError("Pass text and/or checked to update a checklist item.")
+
+        def update(client: Any) -> Any:
+            return _checklist_item(client, issue_key, item_id).update(**payload)
+
+        return _project(_to_plain(self._call_sdk(update)), _SLIM_CHECKLIST_FIELDS)
+
+    def delete_checklist_item(self, issue_key: str, item_id: str) -> Any:
+        def delete(client: Any) -> Any:
+            _checklist_item(client, issue_key, item_id).delete()
+            return {"deleted": str(item_id), "issue": issue_key}
+
+        return _to_plain(self._call_sdk(delete))
+
+    def list_attachments(self, issue_key: str, limit: int = _DEFAULT_LIMIT) -> Any:
         return _to_plain(
-            self._call_sdk(lambda client: list(client.issues[issue_key].attachments))
+            self._call_sdk(
+                lambda client: _take(client.issues[issue_key].attachments, limit)
+            )
         )
 
     def download_attachment(
@@ -562,6 +665,18 @@ def _field(value: Any, name: str) -> Any:
         return getattr(value, name, None)
 
 
+def _checklist_item(client: Any, issue_key: str, item_id: str) -> Any:
+    # Tracker documents PATCH and DELETE on a single checklist item but not GET,
+    # so the item cannot be addressed directly the way a comment can. Locate it
+    # in the list instead — the SDK resource that comes back carries its own
+    # path, which is all update()/delete() need. Same shape as unlink_issue.
+    target = str(item_id)
+    for item in _take(client.issues[issue_key].checklist_items, _DICTIONARY_LIMIT):
+        if str(_field(item, "id")) == target:
+            return item
+    raise ValueError(f"No checklist item {item_id!r} on issue {issue_key}.")
+
+
 def _take(iterable: Any, limit: int) -> list[Any]:
     # Stop iterating a (lazily cursor-paginated) SDK result once `limit` items
     # are collected, so later pages are never fetched.
@@ -593,6 +708,21 @@ _SLIM_ISSUE_FIELDS = (
 )
 
 
+# A link's `type` keeps inward/outward rather than collapsing to a bare ref:
+# the id alone ("dependency") does not say which way the relationship reads.
+_SLIM_LINK_FIELDS = ("id", "direction", "status")
+_SLIM_LINK_TYPE_KEYS = ("id", "inward", "outward")
+_SLIM_CHECKLIST_FIELDS = ("id", "text", "checked", "assignee", "deadline")
+
+# Write receipts. A create response is worth exactly two things to the caller:
+# proof the write landed, and any value the server assigned or normalized. The
+# rest — the echoed text it just sent, the full author object, the entire parent
+# issue embedded in a worklog record — is bulk it already has or never needed.
+_COMMENT_RECEIPT_FIELDS = ("id", "createdBy", "createdAt")
+_COMMENT_EDIT_RECEIPT_FIELDS = ("id", "updatedBy", "updatedAt")
+_WORKLOG_RECEIPT_FIELDS = ("id", "duration", "start", "createdBy", "createdAt")
+
+
 def _slim_ref(value: Any) -> Any:
     # Collapse a nested Tracker reference (user, status, queue...) to just its
     # identifying keys, dropping self URLs and other bulk.
@@ -603,13 +733,57 @@ def _slim_ref(value: Any) -> Any:
     return value
 
 
+def _project(value: Any, fields: tuple[str, ...]) -> Any:
+    # Keep only `fields`, collapsing every nested reference to its identifying
+    # keys. Lists map elementwise; anything that is not a dict passes through.
+    if isinstance(value, list):
+        return [_project(item, fields) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {name: _slim_ref(value[name]) for name in fields if name in value}
+
+
 def _slim_issue(issue: Any) -> Any:
+    return _project(issue, _SLIM_ISSUE_FIELDS)
+
+
+def _issue_receipt(issue: Any, patched: Iterable[str] = ()) -> Any:
+    """Post-write view of an issue: the compact projection plus what changed.
+
+    Returning the whole issue after a PATCH is what made update the single most
+    expensive tool here — a full object is ~29 fields, most of them untouched by
+    the write. The two things the caller actually needs are proof the write
+    landed and the server's canonical value of the fields that moved, so echo
+    the patched keys even when they fall outside the projection (custom fields,
+    description). `version` rides along because Tracker's optimistic locking
+    keys off it.
+    """
     if not isinstance(issue, dict):
         return issue
-    slim: dict[str, Any] = {}
-    for field in _SLIM_ISSUE_FIELDS:
-        if field in issue:
-            slim[field] = _slim_ref(issue[field])
+    slim = _project(issue, _SLIM_ISSUE_FIELDS + ("version",))
+    for name in patched:
+        if name in issue and name not in slim:
+            slim[name] = _slim_ref(issue[name])
+    return slim
+
+
+def _slim_link(link: Any) -> Any:
+    # A link's `object` is a *complete* issue object in the API response, which
+    # is what makes a list of links cost far more than the relationships it
+    # describes. Collapse it to an issue ref and keep the type's inward/outward
+    # wording.
+    if isinstance(link, list):
+        return [_slim_link(item) for item in link]
+    if not isinstance(link, dict):
+        return link
+    slim = _project(link, _SLIM_LINK_FIELDS)
+    link_type = link.get("type")
+    if isinstance(link_type, dict):
+        slim["type"] = {
+            key: link_type[key] for key in _SLIM_LINK_TYPE_KEYS if key in link_type
+        }
+    if "object" in link:
+        slim["object"] = _slim_ref(link["object"])
     return slim
 
 
@@ -691,28 +865,63 @@ def _json_safe(fn: Callable[..., Any], error_cls: type[Exception]) -> Callable[.
     return wrapper
 
 
-def tool(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Register a Yandex Tracker tool.
+def _tool(annotations: ToolAnnotations) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Build a registration decorator carrying a fixed set of tool annotations.
 
     The handler's raw return value becomes a single compact JSON text block
     (structured_output=False keeps MCPServer from also emitting a duplicating
     structuredContent block and an output schema), and domain errors surface as
     clean isError tool results instead of internal errors.
     """
-    return mcp.tool(structured_output=False)(_json_safe(fn, ToolError))
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        return mcp.tool(structured_output=False, annotations=annotations)(
+            _json_safe(fn, ToolError)
+        )
+
+    return decorator
+
+
+# Three flavours, so every tool states at its definition site what it does to the
+# user's Tracker. Hosts read these hints to decide how much friction a call
+# deserves: `readOnlyHint` is what lets a client auto-approve a lookup instead of
+# prompting for each one, and `destructiveHint` separates "adds something" from
+# "overwrites or removes something".
+#
+# Only the two hints that carry information are emitted. `idempotentHint` and
+# `openWorldHint` are deliberately left off: every tool here talks to the same
+# external service, so open-world is uniform and says nothing, and idempotency
+# for Tracker writes depends on queue workflow rather than on the tool.
+read_tool = _tool(ToolAnnotations(read_only_hint=True))
+# Additive: creates something new and leaves existing data alone.
+additive_tool = _tool(ToolAnnotations(read_only_hint=False, destructive_hint=False))
+# Overwrites a value or removes data. Deletes, patches, and status transitions
+# all land here — the previous value does not survive the call.
+destructive_tool = _tool(ToolAnnotations(read_only_hint=False, destructive_hint=True))
 
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
+# Every Tracker collection is cursor-paginated and iterating one follows each
+# "next" link to the end, so a list tool without a cap is unbounded. This is a
+# hard cap on items returned, not a page size.
+Limit = Annotated[
+    int,
+    Field(ge=1, le=1000, description="Max items to return (hard cap, not a page size). Default 50."),
+]
+Full = Annotated[
+    bool,
+    Field(description="Return complete objects instead of the compact projection. Off by default to keep responses small."),
+]
 
 
 # --- Issues -----------------------------------------------------------------
-@tool
+@read_tool
 def tracker_get_issue(issue_key: NonEmptyStr) -> Any:
     """Get a Yandex Tracker issue by key."""
     return get_client().get_issue(issue_key)
 
 
-@tool
+@read_tool
 def tracker_search_issues(
     query: str | None = None,
     # `filter` shadows the builtin on purpose: the arg name mirrors the Tracker
@@ -753,25 +962,36 @@ def tracker_search_issues(
     )
 
 
-@tool
+@additive_tool
 def tracker_create_issue(
     queue: NonEmptyStr,
     summary: NonEmptyStr,
     description: str | None = None,
     fields: Annotated[dict | None, Field(description="Additional Tracker issue fields.")] = None,
+    full: Full = False,
 ) -> Any:
-    """Create a Yandex Tracker issue."""
+    """Create a Yandex Tracker issue.
+
+    Returns a compact receipt — the new issue's key plus its identifying fields,
+    version, and any extra `fields` as the server stored them. Pass full=true for
+    the complete issue object.
+    """
     return get_client().create_issue(
-        queue=queue, summary=summary, description=description, fields=fields
+        queue=queue, summary=summary, description=description, fields=fields, full=full
     )
 
 
-@tool
+@destructive_tool
 def tracker_update_issue(
     issue_key: NonEmptyStr,
     fields: Annotated[dict, Field(description="Fields to patch (raw Tracker API field names and values).")],
+    full: Full = False,
 ) -> Any:
     """Update fields on a Yandex Tracker issue.
+
+    Returns a compact receipt — the issue's identifying fields, its new version,
+    and every patched field as the server stored it — rather than the whole
+    issue. Pass full=true for the complete object.
 
     fields is a raw Tracker PATCH body, so it also covers: tags via
     {"tags": {"add": [...], "remove": [...]}} (or a full array to replace);
@@ -779,23 +999,39 @@ def tracker_update_issue(
     {"parent": {"key": "TEST-2"}}. Epic association is a link, not a field — use
     tracker_link_issues for that.
     """
-    return get_client().update_issue(issue_key, fields)
+    return get_client().update_issue(issue_key, fields, full=full)
 
 
 # --- Comments ---------------------------------------------------------------
-@tool
+@additive_tool
 def tracker_add_comment(issue_key: NonEmptyStr, text: NonEmptyStr) -> Any:
-    """Add a comment to a Yandex Tracker issue."""
+    """Add a comment to a Yandex Tracker issue.
+
+    Returns a receipt (comment id, author, timestamp), not the echoed text.
+    """
     return get_client().add_comment(issue_key, text)
 
 
-@tool
-def tracker_list_comments(issue_key: NonEmptyStr) -> Any:
-    """List comments for a Yandex Tracker issue."""
-    return get_client().list_comments(issue_key)
+@read_tool
+def tracker_list_comments(issue_key: NonEmptyStr, limit: Limit = 50) -> Any:
+    """List comments for a Yandex Tracker issue, oldest first, at most `limit`."""
+    return get_client().list_comments(issue_key, limit=limit)
 
 
-@tool
+@destructive_tool
+def tracker_update_comment(
+    issue_key: NonEmptyStr,
+    comment_id: Annotated[str, Field(min_length=1, description="Comment id from tracker_list_comments.")],
+    text: NonEmptyStr,
+) -> Any:
+    """Replace the text of an existing comment (get ids from tracker_list_comments).
+
+    Returns a receipt (comment id, editor, timestamp), not the echoed text.
+    """
+    return get_client().update_comment(issue_key, comment_id, text)
+
+
+@destructive_tool
 def tracker_delete_comment(
     issue_key: NonEmptyStr,
     comment_id: Annotated[str, Field(min_length=1, description="Comment id from tracker_list_comments.")],
@@ -805,13 +1041,13 @@ def tracker_delete_comment(
 
 
 # --- Transitions ------------------------------------------------------------
-@tool
+@read_tool
 def tracker_list_transitions(issue_key: NonEmptyStr) -> Any:
     """List available workflow transitions for a Yandex Tracker issue."""
     return get_client().list_transitions(issue_key)
 
 
-@tool
+@destructive_tool
 def tracker_move_issue_status(
     issue_key: NonEmptyStr,
     status: Annotated[str, Field(min_length=1, description="Transition id/display or destination status id/key/display.")],
@@ -821,7 +1057,7 @@ def tracker_move_issue_status(
     return get_client().move_issue_status(issue_key, status, fields)
 
 
-@tool
+@destructive_tool
 def tracker_execute_transition(
     issue_key: NonEmptyStr,
     transition_id: NonEmptyStr,
@@ -832,7 +1068,7 @@ def tracker_execute_transition(
 
 
 # --- Links ------------------------------------------------------------------
-@tool
+@additive_tool
 def tracker_link_issues(
     issue_key: Annotated[str, Field(min_length=1, description="Source issue, e.g. TEST-1.")],
     relationship: Annotated[
@@ -843,18 +1079,28 @@ def tracker_link_issues(
 ) -> Any:
     """Create a link between two Yandex Tracker issues.
 
-    Use tracker_list_link_types to discover valid relationship values.
+    Use tracker_list_link_types to discover valid relationship values. Returns
+    the new link in the same compact shape as tracker_list_links.
     """
     return get_client().link_issue(issue_key, relationship, target_issue)
 
 
-@tool
-def tracker_list_links(issue_key: NonEmptyStr) -> Any:
-    """List links of a Yandex Tracker issue (each carries an id for tracker_unlink_issues)."""
-    return get_client().list_links(issue_key)
+@read_tool
+def tracker_list_links(
+    issue_key: NonEmptyStr,
+    limit: Limit = 50,
+    full: Full = False,
+) -> Any:
+    """List links of a Yandex Tracker issue (each carries an id for tracker_unlink_issues).
+
+    Each link is returned compactly — id, type (with its inward/outward wording),
+    direction, status, and the linked issue trimmed to key/summary. The raw API
+    embeds a complete issue object per link; pass full=true if you need it.
+    """
+    return get_client().list_links(issue_key, limit=limit, full=full)
 
 
-@tool
+@destructive_tool
 def tracker_unlink_issues(
     issue_key: NonEmptyStr,
     link_id: Annotated[str, Field(min_length=1, description="Link id from tracker_list_links.")],
@@ -864,28 +1110,28 @@ def tracker_unlink_issues(
 
 
 # --- Queues & users ---------------------------------------------------------
-@tool
-def tracker_list_queues() -> Any:
-    """List Yandex Tracker queues."""
-    return get_client().list_queues()
+@read_tool
+def tracker_list_queues(limit: Limit = 50) -> Any:
+    """List Yandex Tracker queues, at most `limit`."""
+    return get_client().list_queues(limit=limit)
 
 
-@tool
+@read_tool
 def tracker_list_users(
     email: Annotated[str | None, Field(description="Filter by exact email match.")] = None,
     group: Annotated[str | None, Field(description="Filter by group id.")] = None,
-    per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
+    limit: Limit = 50,
 ) -> Any:
     """List Yandex Tracker users (for assignee, followers, and other user fields).
 
     Supports server-side filters: email (exact match) and group. Note: Tracker
     has no server-side search by login or name — fetch and filter client-side
-    for that.
+    for that, and raise `limit` if the directory is larger than the default.
     """
-    return get_client().list_users(email=email, group=group, per_page=per_page)
+    return get_client().list_users(email=email, group=group, limit=limit)
 
 
-@tool
+@read_tool
 def tracker_get_user(
     login_or_uid: Annotated[str, Field(min_length=1, description="User login (e.g. jsmith) or numeric uid.")],
 ) -> Any:
@@ -893,44 +1139,44 @@ def tracker_get_user(
     return get_client().get_user(login_or_uid)
 
 
-@tool
+@read_tool
 def tracker_get_current_user() -> Any:
     """Get the currently authenticated Yandex Tracker user (the token owner)."""
     return get_client().get_current_user()
 
 
 # --- Reference dictionaries -------------------------------------------------
-@tool
+@read_tool
 def tracker_list_statuses() -> Any:
     """List the global Yandex Tracker status dictionary."""
     return get_client().list_statuses()
 
 
-@tool
+@read_tool
 def tracker_list_issue_types() -> Any:
     """List the global Yandex Tracker issue-type dictionary."""
     return get_client().list_issue_types()
 
 
-@tool
+@read_tool
 def tracker_list_priorities() -> Any:
     """List the global Yandex Tracker priority dictionary."""
     return get_client().list_priorities()
 
 
-@tool
+@read_tool
 def tracker_list_fields() -> Any:
     """List Yandex Tracker fields, including custom fields."""
     return get_client().list_fields()
 
 
-@tool
+@read_tool
 def tracker_list_link_types() -> Any:
     """List Yandex Tracker link types (valid relationship values for tracker_link_issues)."""
     return get_client().list_link_types()
 
 
-@tool
+@read_tool
 def tracker_list_queue_versions(
     queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
@@ -938,7 +1184,7 @@ def tracker_list_queue_versions(
     return get_client().list_queue_versions(queue)
 
 
-@tool
+@read_tool
 def tracker_list_queue_components(
     queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
@@ -946,7 +1192,7 @@ def tracker_list_queue_components(
     return get_client().list_queue_components(queue)
 
 
-@tool
+@read_tool
 def tracker_list_queue_local_fields(
     queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
@@ -957,7 +1203,7 @@ def tracker_list_queue_local_fields(
     return get_client().list_queue_local_fields(queue)
 
 
-@tool
+@read_tool
 def tracker_list_queue_tags(
     queue: Annotated[str, Field(min_length=1, description="Queue key, e.g. TEST.")],
 ) -> Any:
@@ -966,67 +1212,97 @@ def tracker_list_queue_tags(
 
 
 # --- Activity ---------------------------------------------------------------
-@tool
+@read_tool
 def tracker_get_changelog(
     issue_key: NonEmptyStr,
     field: Annotated[str | None, Field(description="Filter to changes of a single field id, e.g. status.")] = None,
     # `type` shadows the builtin on purpose: it mirrors the Tracker changelog
     # get-param name; the body forwards it as change_type.
     type: Annotated[str | None, Field(description="Filter by change type, e.g. IssueWorkflow, IssueUpdated.")] = None,
-    per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
+    limit: Limit = 50,
 ) -> Any:
-    """Get the change history of a Yandex Tracker issue.
+    """Get the change history of a Yandex Tracker issue, oldest first, at most `limit`.
 
     Optionally filter by field and change type.
     """
-    return get_client().get_changelog(issue_key, field=field, change_type=type, per_page=per_page)
+    return get_client().get_changelog(issue_key, field=field, change_type=type, limit=limit)
 
 
-@tool
-def tracker_list_worklog(issue_key: NonEmptyStr) -> Any:
-    """List worklog (time-tracking) records of a Yandex Tracker issue."""
-    return get_client().list_worklog(issue_key)
+@read_tool
+def tracker_list_worklog(issue_key: NonEmptyStr, limit: Limit = 50) -> Any:
+    """List worklog (time-tracking) records of a Yandex Tracker issue, at most `limit`."""
+    return get_client().list_worklog(issue_key, limit=limit)
 
 
-@tool
+@additive_tool
 def tracker_add_worklog(
     issue_key: NonEmptyStr,
     duration: Annotated[str, Field(min_length=1, description="ISO 8601 duration, e.g. PT1H30M for 1h30m.")],
     comment: str | None = None,
     start: Annotated[str | None, Field(description="ISO 8601 start datetime, e.g. 2026-07-03T10:00:00.000+0000.")] = None,
 ) -> Any:
-    """Add a worklog (time spent) record to a Yandex Tracker issue."""
+    """Add a worklog (time spent) record to a Yandex Tracker issue.
+
+    Returns a receipt (record id, duration, start, author, timestamp).
+    """
     return get_client().add_worklog(issue_key, duration, comment=comment, start=start)
 
 
 # --- Checklist --------------------------------------------------------------
-@tool
-def tracker_list_checklist(issue_key: NonEmptyStr) -> Any:
-    """List checklist items of a Yandex Tracker issue."""
-    return get_client().list_checklist(issue_key)
+@read_tool
+def tracker_list_checklist(issue_key: NonEmptyStr, limit: Limit = 50) -> Any:
+    """List checklist items of a Yandex Tracker issue, at most `limit`."""
+    return get_client().list_checklist(issue_key, limit=limit)
 
 
-@tool
+@additive_tool
 def tracker_add_checklist_item(
     issue_key: NonEmptyStr,
     text: NonEmptyStr,
     checked: Annotated[bool, Field(description="Initial checked state.")] = False,
 ) -> Any:
-    """Add a checklist item to a Yandex Tracker issue."""
+    """Add a checklist item to a Yandex Tracker issue.
+
+    Returns the item (or the resulting checklist) with its id, text, and state.
+    """
     return get_client().add_checklist_item(issue_key, text, checked=checked)
 
 
+@destructive_tool
+def tracker_update_checklist_item(
+    issue_key: NonEmptyStr,
+    item_id: Annotated[str, Field(min_length=1, description="Checklist item id from tracker_list_checklist.")],
+    text: Annotated[str | None, Field(description="New text. Omit to leave unchanged.")] = None,
+    checked: Annotated[bool | None, Field(description="New checked state. Omit to leave unchanged.")] = None,
+) -> Any:
+    """Update a checklist item's text and/or checked state.
+
+    This is how an item gets ticked off. Pass at least one of text / checked.
+    """
+    return get_client().update_checklist_item(issue_key, item_id, text=text, checked=checked)
+
+
+@destructive_tool
+def tracker_delete_checklist_item(
+    issue_key: NonEmptyStr,
+    item_id: Annotated[str, Field(min_length=1, description="Checklist item id from tracker_list_checklist.")],
+) -> Any:
+    """Delete a checklist item from a Yandex Tracker issue by its item id."""
+    return get_client().delete_checklist_item(issue_key, item_id)
+
+
 # --- Attachments ------------------------------------------------------------
-@tool
-def tracker_list_attachments(issue_key: NonEmptyStr) -> Any:
+@read_tool
+def tracker_list_attachments(issue_key: NonEmptyStr, limit: Limit = 50) -> Any:
     """List attachment metadata (id, name, size, url) of a Yandex Tracker issue.
 
-    Use tracker_download_attachment to fetch the bytes.
+    Returns at most `limit` items. Use tracker_download_attachment to fetch the
+    bytes.
     """
-    return get_client().list_attachments(issue_key)
+    return get_client().list_attachments(issue_key, limit=limit)
 
 
-@tool
+@destructive_tool
 def tracker_download_attachment(
     issue_key: NonEmptyStr,
     attachment_id: Annotated[str, Field(min_length=1, description="Attachment id from tracker_list_attachments.")],
@@ -1041,7 +1317,7 @@ def tracker_download_attachment(
     return get_client().download_attachment(issue_key, attachment_id, dest_dir, filename=filename)
 
 
-@tool
+@additive_tool
 def tracker_upload_attachment(
     issue_key: NonEmptyStr,
     file_path: Annotated[str, Field(min_length=1, description="Absolute path to the local file to upload.")],
@@ -1051,7 +1327,7 @@ def tracker_upload_attachment(
     return get_client().upload_attachment(issue_key, file_path, filename=filename)
 
 
-@tool
+@destructive_tool
 def tracker_delete_attachment(
     issue_key: NonEmptyStr,
     attachment_id: Annotated[str, Field(min_length=1, description="Attachment id from tracker_list_attachments.")],
