@@ -89,19 +89,59 @@ class FakeLinks:
         return {"id": "new", **kwargs}
 
 
+_UNSET = object()
+
+
 class FakeCreatableList:
     """Iterable collection that also records create() calls (worklog, checklist)."""
 
-    def __init__(self, items=None):
+    def __init__(self, items=None, create_result=_UNSET):
         self.items = list(items or [])
         self.created = []
+        self._create_result = create_result
 
     def __iter__(self):
         return iter(self.items)
 
     def create(self, **kwargs):
         self.created.append(kwargs)
+        if self._create_result is not _UNSET:
+            return self._create_result
         return {"id": "new", **kwargs}
+
+
+class FakeSilentChecklist(FakeCreatableList):
+    """Mirrors the real SDK, whose checklistItems.create() returns None.
+
+    yandex_tracker_client's checklistItems.create calls super().create(...) and
+    never returns it, so the API response is discarded.
+    """
+
+    def create(self, **kwargs):
+        super().create(**kwargs)
+        self.items.append({"self": "https://api/…", "id": "ci2", **kwargs})
+        return None
+
+
+class FakeEndlessCollection:
+    """Stands in for an SDK cursor-paginated collection.
+
+    Iterating one follows every "next" link, so it ends only when the data does.
+    Materializing it with list() is exactly what made the list_* calls unbounded.
+    """
+
+    def __init__(self):
+        self.yielded = 0
+        self.get_all_calls = []
+
+    def __iter__(self):
+        while True:
+            self.yielded += 1
+            yield {"id": f"item{self.yielded}"}
+
+    def get_all(self, **params):
+        self.get_all_calls.append(params)
+        return self
 
 
 class FakeAttachment:
@@ -204,14 +244,58 @@ class FakeComment:
         self.id = comment_id
         self._collection = collection
 
+    def update(self, **kwargs):
+        self._collection.updated.append((self.id, kwargs))
+        return {
+            "self": "https://api/…",
+            "id": self.id,
+            "text": kwargs.get("text"),
+            "createdBy": {"self": "https://api/…", "id": "42", "display": "J. Smith"},
+            "updatedBy": {
+                "self": "https://api/…",
+                "id": "42",
+                "display": "J. Smith",
+                "cloudUid": "abc",
+            },
+            "createdAt": "2026-07-01T10:00:00.000+0000",
+            "updatedAt": "2026-08-23T11:00:00.000+0000",
+            "version": 2,
+        }
+
     def delete(self):
         self._collection.deleted.append(self.id)
+
+
+class FakeChecklistItem:
+    """An SDK resource: carries its own path and the injected update/delete."""
+
+    def __init__(self, item_id, text, checked=False):
+        self.id = item_id
+        self.text = text
+        self.checked = checked
+        self.deleted = False
+
+    def update(self, **kwargs):
+        self.__dict__.update(kwargs)
+        return self
+
+    def delete(self):
+        self.deleted = True
+
+    def as_dict(self):
+        return {
+            "self": "https://api/…",
+            "id": self.id,
+            "text": self.text,
+            "checked": self.checked,
+        }
 
 
 class FakeComments:
     def __init__(self):
         self.created = []
         self.deleted = []
+        self.updated = []
 
     def __getitem__(self, key):
         return FakeComment(str(key), self)
@@ -270,6 +354,48 @@ class FakeSdkClient:
             queues
             or [FakeQueue("TEST", versions=[{"id": "v1"}], components=[{"id": "c1"}])]
         )
+
+
+# A Tracker issue as the API really returns it: ~20 fields, nested refs with
+# `self` URLs, and a description that dwarfs everything else.
+FULL_ISSUE_PAYLOAD = {
+    "self": "https://api.tracker.yandex.net/v2/issues/TEST-1",
+    "id": "issue-1",
+    "key": "TEST-1",
+    "version": 12,
+    "summary": "Новое название",
+    "description": "тело задачи " * 200,
+    "status": {"self": "https://api/…", "id": "2", "key": "inProgress", "display": "В работе"},
+    "type": {"self": "https://api/…", "id": "2", "key": "task", "display": "Задача"},
+    "priority": {"self": "https://api/…", "id": "3", "key": "normal", "display": "Средний"},
+    "assignee": {"self": "https://api/…", "id": "42", "display": "J. Smith", "cloudUid": "abc"},
+    "queue": {"self": "https://api/…", "id": "1", "key": "TEST", "display": "Test"},
+    "createdAt": "2026-07-01T10:00:00.000+0000",
+    "updatedAt": "2026-08-23T10:00:00.000+0000",
+    "createdBy": {"self": "https://api/…", "id": "42", "display": "J. Smith"},
+    "followers": [{"self": "https://api/…", "id": "7", "display": "A"}],
+    "boards": [{"id": "b1", "name": "Board"}],
+    "boardStatus": "review",
+    "statusStartTime": "2026-08-23T09:00:00.000+0000",
+}
+
+# The API embeds a *complete* issue object in every link's `object`.
+LINK_PAYLOAD = {
+    "self": "https://api.tracker.yandex.net/v2/issues/TEST-1/links/100",
+    "id": 100,
+    "type": {
+        "self": "https://api/…",
+        "id": "depends",
+        "inward": "Зависит от",
+        "outward": "Блокирует",
+    },
+    "direction": "outward",
+    "object": dict(FULL_ISSUE_PAYLOAD, key="TEST-2", id="issue-2", display="Починить логин"),
+    "status": {"self": "https://api/…", "id": "1", "key": "open", "display": "Открыт"},
+    "createdBy": {"self": "https://api/…", "id": "42", "display": "J. Smith", "cloudUid": "abc"},
+    "createdAt": "2026-07-01T10:00:00.000+0000",
+    "updatedAt": "2026-07-01T10:00:00.000+0000",
+}
 
 
 class ClientTests(unittest.TestCase):
@@ -365,7 +491,8 @@ class ClientTests(unittest.TestCase):
         issue = FakeIssue("TEST-1")
         client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
 
-        self.assertEqual(client.add_comment("TEST-1", "hello"), {"id": 1, "text": "hello"})
+        # add_comment answers with a receipt: the caller already has the text.
+        self.assertEqual(client.add_comment("TEST-1", "hello"), {"id": 1})
         self.assertEqual(client.list_comments("TEST-1"), [{"id": 1, "text": "hello"}])
         self.assertEqual(issue.comments.created, [{"text": "hello"}])
 
@@ -667,22 +794,32 @@ class ClientTests(unittest.TestCase):
         sdk_client = FakeSdkClient(issue)
         client = YandexTrackerClient(tracker_client=sdk_client)
 
-        result = client.list_users(email="a@b.c", group="42", per_page=50)
+        result = client.list_users(email="a@b.c", group="42", limit=50)
 
         self.assertEqual(result, [{"id": "user1"}])
         self.assertEqual(
             sdk_client.users.get_all_calls,
-            [{"email": "a@b.c", "group": "42", "perPage": 50}],
+            [{"perPage": 50, "email": "a@b.c", "group": "42"}],
         )
 
-    def test_list_users_without_filters_sends_no_params(self):
+    def test_list_users_always_bounds_the_page_size(self):
         issue = FakeIssue("TEST-1")
         sdk_client = FakeSdkClient(issue)
         client = YandexTrackerClient(tracker_client=sdk_client)
 
         client.list_users()
+        # perPage rides along even with no filters: without it the SDK falls back
+        # to its own default page size and the iterator walks the whole directory.
+        self.assertEqual(sdk_client.users.get_all_calls, [{"perPage": 50}])
 
-        self.assertEqual(sdk_client.users.get_all_calls, [{}])
+    def test_list_users_clamps_page_size_to_the_api_maximum(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        client.list_users(limit=400)
+
+        self.assertEqual(sdk_client.users.get_all_calls, [{"perPage": 100}])
 
     def test_list_queue_local_fields(self):
         issue = FakeIssue("TEST-1")
@@ -708,14 +845,273 @@ class ClientTests(unittest.TestCase):
         client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
 
         result = client.get_changelog(
-            "TEST-1", field="status", change_type="IssueWorkflow", per_page=10
+            "TEST-1", field="status", change_type="IssueWorkflow", limit=10
         )
 
         self.assertEqual(result, [{"id": "cl1"}])
         self.assertEqual(
             issue.changelog.get_all_calls,
-            [{"field": "status", "type": "IssueWorkflow", "perPage": 10}],
+            [{"perPage": 10, "field": "status", "type": "IssueWorkflow"}],
         )
+
+    # --- Compact write receipts and link projection (P0) -------------------
+    def test_update_issue_returns_a_write_receipt(self):
+        issue = FakeIssue("TEST-1")
+        issue.update = lambda **kwargs: dict(FULL_ISSUE_PAYLOAD)
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.update_issue(
+            "TEST-1", {"summary": "Новое название", "boardStatus": "review"}
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "key": "TEST-1",
+                "summary": "Новое название",
+                "status": {"key": "inProgress", "id": "2", "display": "В работе"},
+                "type": {"key": "task", "id": "2", "display": "Задача"},
+                "priority": {"key": "normal", "id": "3", "display": "Средний"},
+                "assignee": {"id": "42", "display": "J. Smith"},
+                "queue": {"key": "TEST", "id": "1", "display": "Test"},
+                "updatedAt": "2026-08-23T10:00:00.000+0000",
+                "createdAt": "2026-07-01T10:00:00.000+0000",
+                "version": 12,
+                # Patched but outside the projection: echoed so the caller sees
+                # the value the server actually stored.
+                "boardStatus": "review",
+            },
+        )
+
+    def test_update_issue_full_returns_the_complete_object(self):
+        issue = FakeIssue("TEST-1")
+        issue.update = lambda **kwargs: dict(FULL_ISSUE_PAYLOAD)
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.update_issue("TEST-1", {"summary": "x"}, full=True)
+
+        self.assertEqual(result["description"], FULL_ISSUE_PAYLOAD["description"])
+        self.assertIn("followers", result)
+        # full=True still strips transport noise.
+        self.assertNotIn("self", result)
+        self.assertNotIn("cloudUid", result["assignee"])
+
+    def test_create_issue_receipt_keeps_the_key_and_the_extra_fields(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        sdk_client.issues.create = lambda **kwargs: dict(FULL_ISSUE_PAYLOAD)
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.create_issue(
+            "TEST", "Новое название", description="тело", fields={"boardStatus": "review"}
+        )
+
+        self.assertEqual(result["key"], "TEST-1")
+        self.assertEqual(result["boardStatus"], "review")
+        # The description the caller just sent is not echoed back.
+        self.assertNotIn("description", result)
+
+    def test_list_links_collapses_the_embedded_issue(self):
+        issue = FakeIssue("TEST-1", links=[dict(LINK_PAYLOAD)])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        self.assertEqual(
+            client.list_links("TEST-1"),
+            [
+                {
+                    "id": 100,
+                    "direction": "outward",
+                    "status": {"key": "open", "id": "1", "display": "Открыт"},
+                    # inward/outward survive: the type id alone does not say
+                    # which way the relationship reads.
+                    "type": {
+                        "id": "depends",
+                        "inward": "Зависит от",
+                        "outward": "Блокирует",
+                    },
+                    "object": {
+                        "key": "TEST-2",
+                        "id": "issue-2",
+                        "display": "Починить логин",
+                    },
+                }
+            ],
+        )
+
+    def test_list_links_full_keeps_the_whole_payload(self):
+        issue = FakeIssue("TEST-1", links=[dict(LINK_PAYLOAD)])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.list_links("TEST-1", full=True)
+
+        self.assertEqual(
+            result[0]["object"]["description"],
+            LINK_PAYLOAD["object"]["description"],
+        )
+        self.assertIn("createdBy", result[0])
+
+    def test_link_issue_returns_the_compact_link(self):
+        issue = FakeIssue("TEST-1")
+        issue.links.create = lambda **kwargs: dict(LINK_PAYLOAD)
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.link_issue("TEST-1", "depends", "TEST-2")
+
+        self.assertEqual(result["object"], {"key": "TEST-2", "id": "issue-2", "display": "Починить логин"})
+        self.assertNotIn("createdBy", result)
+
+    def test_add_worklog_receipt_drops_the_embedded_issue(self):
+        issue = FakeIssue("TEST-1")
+        issue.worklog = FakeCreatableList(
+            create_result={
+                "self": "https://api/…",
+                "id": "wl-9",
+                "version": 1,
+                "issue": dict(FULL_ISSUE_PAYLOAD),
+                "comment": "did work",
+                "duration": "PT1H",
+                "start": "2026-08-23T10:00:00.000+0000",
+                "createdBy": {"self": "…", "id": "42", "display": "J. Smith"},
+                "createdAt": "2026-08-23T10:05:00.000+0000",
+                "updatedAt": "2026-08-23T10:05:00.000+0000",
+            }
+        )
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.add_worklog("TEST-1", "PT1H", comment="did work")
+
+        self.assertEqual(
+            result,
+            {
+                "id": "wl-9",
+                "duration": "PT1H",
+                "start": "2026-08-23T10:00:00.000+0000",
+                "createdBy": {"id": "42", "display": "J. Smith"},
+                "createdAt": "2026-08-23T10:05:00.000+0000",
+            },
+        )
+
+    def test_add_checklist_item_rereads_when_the_sdk_discards_the_response(self):
+        issue = FakeIssue("TEST-1")
+        issue.checklist_items = FakeSilentChecklist(
+            [{"self": "https://api/…", "id": "ci1", "text": "шаг 1", "checked": False}]
+        )
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.add_checklist_item("TEST-1", "шаг 2", checked=True)
+
+        self.assertEqual(issue.checklist_items.created, [{"text": "шаг 2", "checked": True}])
+        # Without the re-read the caller would get a bare null and no item id.
+        self.assertEqual(
+            result,
+            [
+                {"id": "ci1", "text": "шаг 1", "checked": False},
+                {"id": "ci2", "text": "шаг 2", "checked": True},
+            ],
+        )
+
+    # --- Editing comments and checklist items -------------------------------
+    def test_update_comment_returns_an_edit_receipt(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.update_comment("TEST-1", "5", "исправленный текст")
+
+        self.assertEqual(issue.comments.updated, [("5", {"text": "исправленный текст"})])
+        self.assertEqual(
+            result,
+            {
+                "id": "5",
+                "updatedBy": {"id": "42", "display": "J. Smith"},
+                "updatedAt": "2026-08-23T11:00:00.000+0000",
+            },
+        )
+
+    def test_update_checklist_item_ticks_an_item_off(self):
+        item = FakeChecklistItem("ci2", "шаг 2")
+        issue = FakeIssue("TEST-1")
+        issue.checklist_items = FakeCreatableList(
+            [FakeChecklistItem("ci1", "шаг 1", checked=True), item]
+        )
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.update_checklist_item("TEST-1", "ci2", checked=True)
+
+        self.assertTrue(item.checked)
+        self.assertEqual(result, {"id": "ci2", "text": "шаг 2", "checked": True})
+
+    def test_update_checklist_item_needs_something_to_change(self):
+        issue = FakeIssue("TEST-1")
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with self.assertRaises(ValueError):
+            client.update_checklist_item("TEST-1", "ci1")
+
+    def test_delete_checklist_item_removes_the_matching_item(self):
+        item = FakeChecklistItem("ci1", "шаг 1")
+        issue = FakeIssue("TEST-1")
+        issue.checklist_items = FakeCreatableList([item])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        result = client.delete_checklist_item("TEST-1", "ci1")
+
+        self.assertTrue(item.deleted)
+        self.assertEqual(result, {"deleted": "ci1", "issue": "TEST-1"})
+
+    def test_checklist_item_lookup_reports_an_unknown_id(self):
+        issue = FakeIssue("TEST-1")
+        issue.checklist_items = FakeCreatableList([FakeChecklistItem("ci1", "шаг 1")])
+        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+
+        with self.assertRaises(ValueError):
+            client.delete_checklist_item("TEST-1", "nope")
+
+    # --- Every list call is bounded (P1) -----------------------------------
+    def test_list_calls_stop_at_the_limit_instead_of_draining_pages(self):
+        cases = {
+            "list_comments": lambda c: c.list_comments("TEST-1", limit=3),
+            "list_worklog": lambda c: c.list_worklog("TEST-1", limit=3),
+            "list_checklist": lambda c: c.list_checklist("TEST-1", limit=3),
+            "list_attachments": lambda c: c.list_attachments("TEST-1", limit=3),
+            "list_links": lambda c: c.list_links("TEST-1", limit=3),
+            "get_changelog": lambda c: c.get_changelog("TEST-1", limit=3),
+            "list_queues": lambda c: c.list_queues(limit=3),
+            "list_users": lambda c: c.list_users(limit=3),
+        }
+        attach = {
+            "list_comments": lambda issue, sdk, col: setattr(issue, "comments", col),
+            "list_worklog": lambda issue, sdk, col: setattr(issue, "worklog", col),
+            "list_checklist": lambda issue, sdk, col: setattr(issue, "checklist_items", col),
+            "list_attachments": lambda issue, sdk, col: setattr(issue, "attachments", col),
+            "list_links": lambda issue, sdk, col: setattr(issue, "links", col),
+            "get_changelog": lambda issue, sdk, col: setattr(issue, "changelog", col),
+            "list_queues": lambda issue, sdk, col: setattr(sdk, "queues", col),
+            "list_users": lambda issue, sdk, col: setattr(sdk, "users", col),
+        }
+        for name, call in cases.items():
+            with self.subTest(method=name):
+                issue = FakeIssue("TEST-1")
+                sdk_client = FakeSdkClient(issue)
+                collection = FakeEndlessCollection()
+                attach[name](issue, sdk_client, collection)
+                client = YandexTrackerClient(tracker_client=sdk_client)
+
+                result = call(client)
+
+                self.assertEqual(len(result), 3)
+                # The page after the cap is never fetched, let alone the rest.
+                self.assertEqual(collection.yielded, 3)
+
+    def test_reference_dictionaries_are_bounded_by_the_runaway_guard(self):
+        issue = FakeIssue("TEST-1")
+        sdk_client = FakeSdkClient(issue)
+        sdk_client.fields = FakeEndlessCollection()
+        client = YandexTrackerClient(tracker_client=sdk_client)
+
+        result = client.list_fields()
+
+        self.assertEqual(len(result), 500)
+        self.assertEqual(sdk_client.fields.yielded, 500)
 
     def test_call_sdk_wraps_transport_errors_as_api_errors(self):
         issue = FakeIssue("TEST-1")

@@ -17,7 +17,23 @@ These are load-bearing; a change that breaks one is a regression.
 3. **Keep dependencies minimal.** The runtime dependencies are `mcp` (the
    official MCP SDK) and `yandex_tracker_client`. Add another only with a clear
    reason.
-4. **Run the tests after any behavior change:**
+4. **Never materialize an SDK collection with `list()`.** Tracker collections
+   are cursor-paginated and iterating one follows every `next` link, so
+   `list(issue.comments.get_all())` fetches the entire history and
+   `list(client.users.get_all())` fetches the entire directory. Use
+   `_take(collection, limit)`, which stops at the cap and never requests the
+   page after it. Open-ended collections take a caller-supplied `limit`
+   (`_DEFAULT_LIMIT`, 50); reference dictionaries use `_DICTIONARY_LIMIT` (500)
+   as a runaway guard, because silently truncating one would make the caller
+   conclude a value does not exist.
+5. **Project the response.** Reads return a compact projection and writes return
+   a receipt. Reach for the existing helpers — `_slim_ref` for a nested
+   reference, `_project(value, fields)` for a fixed field set, `_slim_issue` /
+   `_issue_receipt` / `_slim_link` for those entities — rather than returning
+   the raw payload. Add a `full: bool = False` passthrough only where the
+   untrimmed object is content a caller might genuinely need; a pure write
+   receipt does not need one.
+6. **Run the tests after any behavior change:**
    ```sh
    python3 -m unittest discover -s tests
    ```
@@ -36,22 +52,38 @@ A tool spans two edits plus tests. Follow the existing patterns.
            issue = client.issues[issue_key]
            return issue.links.create(relationship=relationship, issue=target_key)
 
-       return _to_plain(self._call_sdk(link))
+       return _slim_link(_to_plain(self._call_sdk(link)))
+   ```
+
+   A listing method bounds its result and projects it the same way:
+
+   ```python
+   def list_comments(self, issue_key: str, limit: int = _DEFAULT_LIMIT) -> Any:
+       def get_all(client: Any) -> Any:
+           issue = client.issues[issue_key]
+           return _take(issue.comments.get_all(), limit)   # never list(...)
+
+       return _to_plain(self._call_sdk(get_all))
    ```
 
    `_call_sdk` turns SDK exceptions into `TrackerApiError`; raise `ValueError`
    for bad arguments you detect yourself (it maps to a tool error, not a crash).
 
-2. **MCP server layer — add the `@tool` function.** Write a typed function named
+2. **MCP server layer — add the tool function.** Decorate it with `@read_tool`,
+   `@additive_tool`, or `@destructive_tool` — that choice is the tool's MCP
+   annotations, and `test_every_tool_declares_what_it_does` lists all three sets
+   explicitly, so a new tool fails the suite until it is classified. Write a typed function named
    `tracker_<verb>_<noun>`; MCPServer derives the `inputSchema` from its
    parameters. Required arguments have no default; optional ones default to
    `None`/a literal. Attach parameter descriptions with
    `Annotated[..., Field(description="…")]` and the tool description as the
-   docstring. Return the raw client payload — the `@tool` wrapper serializes it
-   to compact JSON and maps domain errors:
+   docstring. Return the projected client payload — the wrapper serializes it to
+   compact JSON and maps domain errors. The decorator you pick is the tool's
+   annotation: `@read_tool` here would be wrong, because creating a link is a
+   write that only adds.
 
    ```python
-   @tool
+   @additive_tool
    def tracker_link_issues(
        issue_key: str,
        relationship: Annotated[str, Field(description="Link type, e.g. relates.")],

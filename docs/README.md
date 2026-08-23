@@ -21,7 +21,8 @@ The project [README](../README.md) has the quick-start; these docs go deeper.
 lifecycle, and `tools/list` / `tools/call` routing — **stdout carries only
 protocol messages, logs go to stderr**. Everything lives in one module,
 `mcp_yandex_tracker.py`, split into two commented sections: an **MCP server
-layer** (the `@tool`-decorated typed functions and a cached
+layer** (the `@read_tool` / `@additive_tool` / `@destructive_tool` typed
+functions and a cached
 `YandexTrackerClient`) and an **SDK client layer** (wraps the Tracker SDK and
 serializes SDK objects to plain compact JSON). The client is built once
 (lazily) from environment variables and reused. All tools are named `tracker_*`;
