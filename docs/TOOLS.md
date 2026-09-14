@@ -205,6 +205,21 @@ Get one user by login or uid.
 
 Get the authenticated user (the token owner). Takes no arguments.
 
+## Boards & sprints
+
+### `tracker_get_active_sprint`
+
+Get the sprint currently in progress on a board.
+
+| Argument   | Type   | Req | Notes                    |
+| ---------- | ------ | --- | ------------------------ |
+| `board_id` | string | ✅  | Numeric board id, e.g. `42`. |
+
+Tracker sprint statuses are `draft`, `in_progress`, `released` and `archived`;
+this returns the `in_progress` one — the full sprint object (`id`, `name`,
+`status`, `board`, `startDate`, `endDate`, ...). When the board is between
+sprints the response is `null`, not an error.
+
 ## Activity: history, worklog, checklist, attachments
 
 ### `tracker_get_changelog`

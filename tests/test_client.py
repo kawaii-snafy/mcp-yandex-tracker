@@ -165,6 +165,20 @@ class FakeQueues:
         return list(self._queues.values())
 
 
+class FakeBoard:
+    def __init__(self, board_id, sprints=None):
+        self.id = board_id
+        self.sprints = list(sprints or [])
+
+
+class FakeBoards:
+    def __init__(self, boards):
+        self._boards = {str(board.id): board for board in boards}
+
+    def __getitem__(self, key):
+        return self._boards[str(key)]
+
+
 class FakeSeekablePaginatedList:
     def __iter__(self):
         return iter([FakeIssue("TEST-1")])
@@ -255,7 +269,7 @@ class FakeIssue:
 
 
 class FakeSdkClient:
-    def __init__(self, issue, find_result=None, queues=None):
+    def __init__(self, issue, find_result=None, queues=None, boards=None):
         self.issue = issue
         self.issues = FakeCollection({issue.key: issue}, find_result=find_result)
         self._connection = FakeConnection()
@@ -270,6 +284,7 @@ class FakeSdkClient:
             queues
             or [FakeQueue("TEST", versions=[{"id": "v1"}], components=[{"id": "c1"}])]
         )
+        self.boards = FakeBoards(boards or [])
 
 
 class ClientTests(unittest.TestCase):
@@ -716,6 +731,32 @@ class ClientTests(unittest.TestCase):
             issue.changelog.get_all_calls,
             [{"field": "status", "type": "IssueWorkflow", "perPage": 10}],
         )
+
+    def test_get_active_sprint_returns_the_in_progress_sprint(self):
+        board = FakeBoard(
+            42,
+            sprints=[
+                {"id": "1", "name": "Sprint 1", "status": "released"},
+                {"id": "2", "name": "Sprint 2", "status": "in_progress"},
+                {"id": "3", "name": "Sprint 3", "status": "draft"},
+            ],
+        )
+        client = YandexTrackerClient(
+            tracker_client=FakeSdkClient(FakeIssue("TEST-1"), boards=[board])
+        )
+
+        self.assertEqual(
+            client.get_active_sprint("42"),
+            {"id": "2", "name": "Sprint 2", "status": "in_progress"},
+        )
+
+    def test_get_active_sprint_returns_none_between_sprints(self):
+        board = FakeBoard(42, sprints=[{"id": "1", "status": "released"}])
+        client = YandexTrackerClient(
+            tracker_client=FakeSdkClient(FakeIssue("TEST-1"), boards=[board])
+        )
+
+        self.assertIsNone(client.get_active_sprint("42"))
 
     def test_call_sdk_wraps_transport_errors_as_api_errors(self):
         issue = FakeIssue("TEST-1")

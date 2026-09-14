@@ -18,7 +18,7 @@ from pydantic import Field
 # dynamic version via AST, no import) as the package version. A computed
 # expression would force setuptools to import this module at build time, pulling
 # in the runtime deps (mcp, pydantic, …).
-__version__ = "0.6.2"
+__version__ = "0.7.0"
 
 
 # ===========================================================================
@@ -314,6 +314,18 @@ class YandexTrackerClient:
             return client._connection.get(path=queue_obj._path + "/tags")
 
         return _to_plain(self._call_sdk(get_tags))
+
+    def get_active_sprint(self, board_id: str) -> Any:
+        # Tracker sprint statuses are draft / in_progress / released / archived,
+        # so the "active" sprint is the one in progress. A board normally has at
+        # most one; None means the board is between sprints.
+        def find_active(client: Any) -> Any:
+            for sprint in client.boards[str(board_id)].sprints:
+                if _field(sprint, "status") == "in_progress":
+                    return sprint
+            return None
+
+        return _to_plain(self._call_sdk(find_active))
 
     def get_changelog(
         self,
@@ -963,6 +975,19 @@ def tracker_list_queue_tags(
 ) -> Any:
     """List tags defined in a specific Yandex Tracker queue."""
     return get_client().list_queue_tags(queue)
+
+
+# --- Boards & sprints -------------------------------------------------------
+@tool
+def tracker_get_active_sprint(
+    board_id: Annotated[str, Field(min_length=1, description="Numeric board id, e.g. 42.")],
+) -> Any:
+    """Get the sprint currently in progress on a Yandex Tracker board.
+
+    Returns the sprint object (id, name, status, startDate, endDate, ...), or
+    null when the board has no sprint in progress.
+    """
+    return get_client().get_active_sprint(board_id)
 
 
 # --- Activity ---------------------------------------------------------------

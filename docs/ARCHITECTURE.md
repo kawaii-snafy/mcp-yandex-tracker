@@ -17,7 +17,7 @@ Inside `mcp_yandex_tracker.py`, two clearly-commented sections:
 - **SDK client layer** — `YandexTrackerClient` and helpers: config, SDK calls,
   transition matching, serialization.
 - **MCP server layer** — the `MCPServer` instance, the `@tool` wrapper, the client
-  lifecycle, and the 35 `@tool` functions.
+  lifecycle, and the 36 `@tool` functions.
 
 Entry points, all reaching `main()` (which calls `mcp.run(transport="stdio")`):
 

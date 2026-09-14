@@ -115,6 +115,10 @@ class FakeClient:
         self.calls.append(("list_queue_tags", queue))
         return ["backend", "urgent"]
 
+    def get_active_sprint(self, board_id):
+        self.calls.append(("get_active_sprint", board_id))
+        return {"id": "2", "name": "Sprint 2", "status": "in_progress"}
+
     def get_changelog(self, issue_key, field=None, change_type=None, per_page=None):
         self.calls.append(("get_changelog", issue_key, field, change_type, per_page))
         return [{"id": "cl1"}]
@@ -179,7 +183,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_exposes_all_tracker_tools(self):
         tools = await server.mcp.list_tools()
         names = {tool.name for tool in tools}
-        self.assertEqual(len(tools), 35)
+        self.assertEqual(len(tools), 36)
         for name in (
             "tracker_get_issue",
             "tracker_search_issues",
@@ -208,6 +212,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             "tracker_delete_attachment",
             "tracker_list_queue_local_fields",
             "tracker_list_queue_tags",
+            "tracker_get_active_sprint",
         ):
             self.assertIn(name, names)
 
@@ -261,6 +266,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 ("list_queue_local_fields", "TEST"),
             ),
             ("tracker_list_queue_tags", {"queue": "TEST"}, ("list_queue_tags", "TEST")),
+            (
+                "tracker_get_active_sprint",
+                {"board_id": "42"},
+                ("get_active_sprint", "42"),
+            ),
             (
                 "tracker_list_users",
                 {"email": "a@b.c", "group": "42", "per_page": 50},

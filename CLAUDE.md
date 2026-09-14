@@ -55,7 +55,7 @@ clearly-commented sections. `MCPServer` owns the JSON-RPC framing, stdio
 transport, UTF-8, lifecycle, and `tools/list` / `tools/call` routing — none of
 that is hand-rolled here.
 
-- **MCP server layer** — the `mcp = MCPServer(...)` instance and 35
+- **MCP server layer** — the `mcp = MCPServer(...)` instance and 36
   `@tool`-decorated typed functions named `tracker_*`. MCPServer derives each
   tool's input schema from the function's type hints and
   `Annotated[..., Field(description=...)]` metadata, and its description from the

@@ -3,7 +3,7 @@
 Small stdio MCP server for Yandex Tracker. It exposes tools for reading,
 searching, creating, updating, commenting on, transitioning, and linking Tracker
 issues, plus read-only reference lookups (queues, users, statuses, types,
-priorities, fields, versions, components).
+priorities, fields, versions, components) and the active sprint of a board.
 
 ## Usage with Codex
 
