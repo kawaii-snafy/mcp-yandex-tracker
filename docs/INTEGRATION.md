@@ -18,41 +18,41 @@ the process.
 
 ### Required
 
-| Variable                        | Purpose                                              |
-| ------------------------------- | ---------------------------------------------------- |
-| `YANDEX_TRACKER_TOKEN`          | OAuth or IAM token.                                  |
-| `YANDEX_TRACKER_CLOUD_ORG_ID`   | Cloud organization id. Use this **or** the next one. |
-| `YANDEX_TRACKER_ORG_ID`         | Non-cloud organization id.                           |
+| Variable                      | Purpose                                              |
+| ----------------------------- | ---------------------------------------------------- |
+| `YANDEX_TRACKER_TOKEN`        | OAuth or IAM token.                                  |
+| `YANDEX_TRACKER_CLOUD_ORG_ID` | Cloud organization id. Use this **or** the next one. |
+| `YANDEX_TRACKER_ORG_ID`       | Non-cloud organization id.                           |
 
 Exactly one org id must be set; if neither is present the tool call fails with a
 config error.
 
 ### Optional
 
-| Variable                     | Default                          | Notes                                                            |
-| ---------------------------- | -------------------------------- | --------------------------------------------------------------- |
-| `YANDEX_TRACKER_AUTH_SCHEME` | `OAuth`                          | The `Authorization` header scheme. Set to `Bearer` for IAM tokens. |
+| Variable                     | Default                          | Notes                                                                                      |
+| ---------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| `YANDEX_TRACKER_AUTH_SCHEME` | `OAuth`                          | The `Authorization` header scheme. Set to `Bearer` for IAM tokens.                         |
 | `YANDEX_TRACKER_BASE_URL`    | `https://api.tracker.yandex.net` | Host only — the client always appends `/v3`. A leftover `/v2` or `/v3` suffix is stripped. |
-| `YANDEX_TRACKER_TIMEOUT`     | `30`                             | Request timeout in seconds (float).                             |
+| `YANDEX_TRACKER_TIMEOUT`     | `30`                             | Request timeout in seconds.                                                                |
 
 ## Host configuration
 
 ### Codex
 
-Add to `~/.codex/config.toml` (see `codex-mcp.example.toml` in the repo root):
+Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.yandex-tracker]
-command = "uvx"
-args = ["mcp-yandex-tracker"]
+command = "npx"
+args = ["-y", "mcp-yandex-tracker"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
-To run from source instead of the published package, use
-`args = ["--from", "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git", "mcp-yandex-tracker"]`.
+To run from a clone instead of the published package, build it (`bun run build`)
+and set `command = "node"`, `args = ["/path/to/mcp-yandex-tracker/dist/cli.js"]`.
 
 Restart Codex after editing the config.
 
@@ -63,7 +63,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- uvx mcp-yandex-tracker
+  -- npx -y mcp-yandex-tracker
 ```
 
 Verify with `claude mcp list`, `claude mcp get yandex-tracker`, and `/mcp`
@@ -71,10 +71,12 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 
 ### Any MCP host
 
-Point the host at the console script `mcp-yandex-tracker` (installed by the
-package), or run it explicitly:
+Point the host at the published package — `npx -y mcp-yandex-tracker` — or, from
+a clone, at `node dist/cli.js` after `bun run build`.
 
-- `python -m mcp_yandex_tracker`
+The published artifact is a single Node-compatible bundle with a
+`#!/usr/bin/env node` shebang, so **Bun is not required to run it**; Node 20 or
+newer is. `bunx mcp-yandex-tracker` works too.
 
 ## Resources (@-mentions)
 
@@ -100,7 +102,7 @@ MCP requires the `initialize` handshake before any other request, so pipe it
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." uvx mcp-yandex-tracker
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y mcp-yandex-tracker
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
@@ -114,13 +116,13 @@ org id.
 
 ## Troubleshooting
 
-| Symptom                                          | Likely cause                                                                 |
-| ------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Tool result with `isError: true`, "Set YANDEX_TRACKER_TOKEN…" | Token or org id missing from the host's env for this server.                 |
-| `isError: true` with `Yandex Tracker API error <status>` | The request reached Tracker but came back non-2xx (auth, permissions, missing issue). |
-| Host reports the server "crashed" or garbled     | Something wrote non-JSON to stdout. Only JSON-RPC may go to stdout.          |
-| `isError: true`, `Yandex Tracker API error 0: Failed to reach Yandex Tracker…` | The request never got a response — DNS, proxy, TLS or timeout. |
-| JSON-RPC `error` with code `-32601`/unsupported method | The host called a method the server does not implement (see [ARCHITECTURE.md](ARCHITECTURE.md)). |
+| Symptom                                                                                     | Likely cause                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool result with `isError: true`, "Set YANDEX_TRACKER_TOKEN…"                               | Token or org id missing from the host's env for this server.                                                                                                                                          |
+| `isError: true` with `Yandex Tracker API error <status>`                                    | The request reached Tracker but came back non-2xx (auth, permissions, missing issue).                                                                                                                 |
+| Host reports the server "crashed" or garbled                                                | Something wrote non-JSON to stdout. Only JSON-RPC may go to stdout.                                                                                                                                   |
+| `isError: true`, `Yandex Tracker API error 0: Failed to reach Yandex Tracker…`              | The request never got a response — DNS, proxy, TLS or timeout.                                                                                                                                        |
+| JSON-RPC `error` with code `-32601`/unsupported method                                      | The host called a method the server does not implement (see [ARCHITECTURE.md](ARCHITECTURE.md)).                                                                                                      |
 | `resources/read` (a `tracker://…` @-mention) fails with only `Error reading resource <uri>` | An mcp older than this server's 2.1 floor got installed — 2.0 replaced the handler's message with that generic one. Check the resolved version; on 2.1+ the real Tracker/config detail comes through. |
 
 Errors from Tracker or from bad tool arguments come back **inside** a successful

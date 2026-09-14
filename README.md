@@ -17,19 +17,20 @@ Add the server to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.yandex-tracker]
-command = "uvx"
-args = ["mcp-yandex-tracker"]
+command = "npx"
+args = ["-y", "mcp-yandex-tracker"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
-To run the latest unreleased code straight from source instead, replace the
-`args` line with:
+To run from a clone instead, build it (`bun run build`) and point the host at
+the bundle:
 
 ```toml
-args = ["--from", "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git", "mcp-yandex-tracker"]
+command = "node"
+args = ["/path/to/mcp-yandex-tracker/dist/cli.js"]
 ```
 
 For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
@@ -48,7 +49,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- uvx mcp-yandex-tracker
+  -- npx -y mcp-yandex-tracker
 ```
 
 For a non-cloud organization, use `--env YANDEX_TRACKER_ORG_ID="..."` instead
@@ -89,7 +90,7 @@ notification) first:
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." uvx mcp-yandex-tracker
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y mcp-yandex-tracker
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
@@ -114,7 +115,13 @@ Deeper docs live in [`docs/`](docs/README.md):
 ```sh
 git clone git@github.com:kawaii-snafy/mcp-yandex-tracker.git
 cd mcp-yandex-tracker
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-python3 -m unittest discover -s tests
+bun install
+
+bun run typecheck   # tsc --noEmit — Bun transpiles without checking types
+bun test            # the last file builds the bundle and drives it under node
+bun run build       # dist/cli.js
 ```
+
+Development uses [Bun](https://bun.com); **running the published package does
+not** — `dist/cli.js` is a single Node-compatible bundle with a
+`#!/usr/bin/env node` shebang, so `npx` works on a machine with only Node 20+.

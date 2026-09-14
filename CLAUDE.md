@@ -6,10 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents.
 It is a deliberately thin wrapper: **one tool per documented endpoint**, the API's
-own parameter names on the way in, the API's own JSON on the way out. It is built
-on the official MCP Python SDK (`MCPServer`) and reaches Tracker with plain
-`requests` calls. There is no HTTP/SSE transport — one process serves one client
-over stdin/stdout.
+own parameter names on the way in, the API's own JSON on the way out. TypeScript,
+developed with Bun, built to a single Node-compatible bundle, published to npm.
+There is no HTTP/SSE transport — one process serves one client over stdin/stdout.
 
 ## The rule that governs every other decision
 
@@ -19,31 +18,32 @@ over stdin/stdout.
 - Any page is markdown by appending `.md`:
   `https://yandex.ru/support/tracker/en/api/<section>/<page>.md`
 
-Blogs, Stack Overflow, the `yandex_tracker_client` SDK this server used to wrap,
-observed production behavior, and model memory are **not** sources. A path,
-parameter or field that is not on a page from `llms.txt` does not go into the
-code. Before touching a tool, open its page — every tool's docstring links to it.
-If something is genuinely needed and genuinely undocumented, that is a deviation:
-record it in `docs/TOOLS.md` with the reason.
+Blogs, Stack Overflow, observed production behavior, and model memory are **not**
+sources. A path, parameter or field that is not on a page from `llms.txt` does
+not go into the code. Before touching a tool, open its page — every tool's
+description links to it. If something is genuinely needed and genuinely
+undocumented, that is a deviation: record it in `docs/TOOLS.md` with the reason.
 
 ## Commands
 
 ```sh
-# Setup (creates .venv, installs the package + deps editable)
-python3 -m venv .venv && .venv/bin/python -m pip install -e .
+bun install
 
-# Run the full test suite (no network, all fakes)
-.venv/bin/python -m unittest discover -s tests
+bun test                     # everything (the last file drives the built bundle)
+bun test tests/client.test.ts
+bun test -t "builds a v3 url"
 
-# Run a single test
-.venv/bin/python -m unittest tests.test_client.RequestTests.test_builds_a_v3_url_and_passes_the_timeout
+bun run typecheck            # tsc --noEmit — Bun transpiles without checking types
+bun run lint                 # eslint
+bun run format               # prettier --write
+bun run build                # dist/cli.js, a single Node-compatible ESM bundle
+bun run docs:tools           # regenerate the docs/TOOLS.md tables
 
-# Run the server (either; both call main() -> mcp.run("stdio"))
-.venv/bin/mcp-yandex-tracker
-.venv/bin/python -m mcp_yandex_tracker
+bun run src/cli.ts           # run from source
+node dist/cli.js             # run the shipped artifact
 ```
 
-Always run the tests after changing behavior. There is no separate lint step.
+Always run `bun run typecheck` and `bun test` after changing behavior.
 
 Smoke-test without a host — MCP requires the `initialize` handshake before any
 other request, so send it (and the `initialized` notification) first:
@@ -54,12 +54,11 @@ other request, so send it (and the `initialized` notification) first:
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." .venv/bin/mcp-yandex-tracker
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." node dist/cli.js
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
-the server shuts down on EOF, often before it has answered `tools/list` — you
-then get only the `initialize` reply.
+the server shuts down on EOF, often before it has answered `tools/list`.
 
 ## Environment
 
@@ -67,68 +66,64 @@ then get only the `initialize` reply.
 for cloud orgs, or `YANDEX_TRACKER_ORG_ID`) are required; a missing one surfaces
 as a clean tool error, not a crash. Optional: `YANDEX_TRACKER_AUTH_SCHEME`
 (`OAuth` default, `Bearer` for IAM tokens), `YANDEX_TRACKER_BASE_URL` (host only
-— the client always appends `/v3`), `YANDEX_TRACKER_TIMEOUT`.
+— the client always appends `/v3`), `YANDEX_TRACKER_TIMEOUT` (seconds).
 
 ## Architecture
 
 ```
-mcp_yandex_tracker/
-  client.py      # TrackerConfig, the errors, Tracker.request() — the whole Tracker side
-  server.py      # the MCPServer instance, the @tool / @resource wrappers, main()
-  resources.py   # the read-only tracker:// surface
-  tools/         # issues.py queues.py boards.py entities.py admin.py users.py
+src/
+  cli.ts       # serveStdio(() => buildServer())
+  server.ts    # buildServer(): registers every tool and resource; getTracker()
+  client.ts    # config, errors, Tracker over fetch — the whole Tracker side
+  tool.ts      # the ToolDef type and the tool() helper
+  resources.ts # the read-only tracker:// surface
+  tools/       # issues.ts queues.ts boards.ts entities.ts admin.ts users.ts
 ```
 
-`MCPServer` owns the JSON-RPC framing, stdio transport, UTF-8, lifecycle, and
-`tools/list` / `tools/call` routing — none of that is hand-rolled here. Tool
-modules mirror the sections of the documentation, so a doc page maps to exactly
-one code file.
+Tool modules mirror the sections of the documentation, so a doc page maps to
+exactly one code file. `src/tools/index.ts` concatenates them into `allTools`.
 
-Three cross-cutting mechanisms to know before editing:
+Four cross-cutting mechanisms to know before editing:
 
-- **`Tracker.request(method, path, params=, json=, files=, headers=)`** is the
-  only way out. It builds `{base_url}/v3{path}`, sends it on the shared
-  `requests.Session`, maps a transport failure to `TrackerApiError(0, …)` and any
-  non-2xx to `TrackerApiError(status, message, payload)`, and returns the decoded
-  body **untouched**. `upload()` and `download()` are the two variants the wire
-  format forces. The error-body shape is undocumented, so message extraction is
-  best-effort with a fallback to the raw body.
-- **The `@tool` wrapper** (not `mcp.tool` directly). It serializes the handler's
-  return value to a single compact-JSON `TextContent` via
-  `structured_output=False` — this is deliberate: it keeps responses token-lean
-  (no duplicating `structuredContent`, no output schema) and Cyrillic intact. It
-  also maps `TrackerApiError` / `TrackerConfigError` / `ValueError` to a
-  `ToolError`, which the SDK returns as an `isError: true` result (the JSON-RPC
-  call still succeeds). Do not bypass it.
-- **Cached client singleton.** `get_client()` builds one `Tracker` lazily (via the
-  swappable `_client_factory`) and reuses it for the process, so the
-  `requests.Session` connection pool is shared across calls. Tests inject a fake
-  by setting `server._client = None; server._client_factory = lambda: fake`.
+- **Tools are data.** Each is a `tool({ name, description, input, run })` entry.
+  `input` is a Zod shape; `tool()` infers the type of `run`'s `args` from it, so
+  nothing is annotated by hand. The registry is read by `buildServer`, by
+  `tests/tools.test.ts` and by `scripts/gen-tools-doc.ts` alike.
+- **The description is a contract.** Summary line, blank line,
+  `<METHOD> /v3/<path>`, then the documentation URL. The test suite parses both
+  and fails if a tool reaches a different endpoint than it claims.
+- **`Tracker.request(method, path, { params, body, headers })`** is the only way
+  out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on idempotent methods,
+  maps a transport failure to `TrackerApiError(0, …)` and any non-2xx to
+  `TrackerApiError(status, …)`, and returns the decoded body **untouched**.
+  `upload()` and `download()` are the two variants the wire format forces.
+- **Errors are thrown, not wrapped.** `@modelcontextprotocol/server` turns a
+  thrown error into an `isError: true` tool result carrying its message, so no
+  handler needs a try/catch.
 
 ## Non-negotiable rules
 
 - **Documentation first** — the rule above. No undocumented endpoints, no guessed
-  parameters, no knowledge carried over from the old SDK.
+  parameters.
 - **One tool per endpoint, nothing in between.** No projections, no renaming, no
   client-side pagination, no convenience tools that compose several calls. If a
   response is too big, trim it with the API's own `fields` / `expand`.
 - **No second HTTP path.** All Tracker access goes through `Tracker.request()`.
-  Do not add an SDK or a wrapper layer on top of `requests`. Runtime deps stay at
-  `mcp` + `requests`.
-- **stdout is protocol-only.** MCPServer writes JSON-RPC to stdout and logs to
-  stderr. Never `print()` to stdout — it corrupts the MCP stream.
-- **Keep `docs/TOOLS.md` in sync** with the tools when you change one.
+  Runtime deps stay at `@modelcontextprotocol/server` + `zod`.
+- **No `any`, no `as`.** The single cast in the project lives in `src/tool.ts`
+  and is explained there.
+- **stdout is protocol-only.** Never write to stdout — it corrupts the MCP stream.
+- **Keep `docs/TOOLS.md` in sync**: `bun run docs:tools` after changing a tool.
 
 ## Adding a tool
 
-Find the endpoint's page in `llms.txt`, read the `.md`, transcribe its parameters
-into a `@tool` function in the matching `tools/` module (docstring = summary,
-blank line, `<METHOD> /v3/<path>`, page URL), add the row to `docs/TOOLS.md`, and
-add a row to the routing table in `tests/test_server.py`. See `docs/EXTENDING.md`
-for the full pattern and the naming conventions.
+Find the endpoint's page in `llms.txt`, read the `.md`, and add one `tool({...})`
+entry to the matching `src/tools/` array — description as summary, blank line,
+`<METHOD> /v3/<path>`, page URL. Then `bun run docs:tools`. See
+`docs/EXTENDING.md` for the full pattern and the naming conventions.
 
 ## Further docs
 
 `docs/` has the deep guides: `ARCHITECTURE.md` (internals), `EXTENDING.md`
-(adding tools, scaling), `TOOLS.md` (the tool index), and `INTEGRATION.md`
-(connecting hosts). `AGENTS.md` mirrors the non-negotiable rules above.
+(adding tools, scaling), `TOOLS.md` (the generated tool index), and
+`INTEGRATION.md` (connecting hosts). `AGENTS.md` mirrors the rules above.

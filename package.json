@@ -1,0 +1,58 @@
+{
+  "name": "mcp-yandex-tracker",
+  "version": "1.0.0",
+  "description": "MCP stdio server for the Yandex Tracker REST API v3",
+  "type": "module",
+  "license": "MIT",
+  "author": "snafy",
+  "homepage": "https://github.com/kawaii-snafy/mcp-yandex-tracker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git"
+  },
+  "bugs": "https://github.com/kawaii-snafy/mcp-yandex-tracker/issues",
+  "keywords": [
+    "mcp",
+    "yandex-tracker",
+    "llm",
+    "agents",
+    "stdio"
+  ],
+  "bin": {
+    "mcp-yandex-tracker": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun build ./src/cli.ts --target node --format esm --outdir dist --banner '#!/usr/bin/env node' --sourcemap=linked",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "bun test",
+    "docs:tools": "bun run scripts/gen-tools-doc.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^22.19.2",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}

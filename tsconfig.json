@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    // Bun runs and bundles the TypeScript directly, so nothing is ever emitted
+    // by tsc — it is here purely as the type checker (`bun run typecheck`).
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    // TypeScript 6 no longer picks up @types/* automatically.
+    "types": ["bun", "node"],
+
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "tests", "scripts"]
+}
