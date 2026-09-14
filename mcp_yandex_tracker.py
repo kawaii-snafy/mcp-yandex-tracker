@@ -18,7 +18,7 @@ from pydantic import Field
 # dynamic version via AST, no import) as the package version. A computed
 # expression would force setuptools to import this module at build time, pulling
 # in the runtime deps (mcp, pydantic, …).
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 
 # ===========================================================================
@@ -1096,12 +1096,10 @@ def resource(uri: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable
     """Register a read-only Tracker resource.
 
     The body's return value becomes a compact JSON resource, and a domain error
-    becomes a `ResourceError`. How much of that detail reaches the client is the
-    SDK's call and changed inside the 2.x range we allow: mcp 2.0 re-wrapped
-    every handler error into a generic "Error reading resource {uri}" (detail
-    only as `__cause__`), while 2.1+ re-raises a `ResourceError` untouched — so
-    on current mcp this mapping, not just the serialization, is what carries the
-    Tracker message across.
+    becomes a `ResourceError`, which MCPServer re-raises untouched — so this
+    mapping, not just the serialization, is what carries the Tracker message to
+    the client. (That pass-through is why the dependency floor is mcp 2.1: 2.0
+    replaced every handler error with a generic "Error reading resource {uri}".)
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

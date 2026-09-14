@@ -75,12 +75,11 @@ read-only context under the `tracker://` scheme: one template,
 `tracker://issue/{key}`, plus static reference dictionaries
 (`tracker://statuses`, `priorities`, `issue-types`, `fields`, `link-types`,
 `queues`). They go through the same `get_client()` and serialize to compact
-JSON (`application/json`) via the local `resource` wrapper. (On a failed read how
-much detail a client sees depends on the mcp version: 2.0 re-wrapped every
-handler error into a generic `Error reading resource <uri>`, while 2.1+ re-raises
-the wrapper's `ResourceError` untouched — so on current mcp the wrapper's error
-mapping, not just its compact serialization, is what carries the Tracker message
-across.)
+JSON (`application/json`) via the local `resource` wrapper. (On a failed read
+MCPServer re-raises the wrapper's `ResourceError` untouched, so the wrapper's
+error mapping — not just its compact serialization — is what carries the Tracker
+message across. That pass-through is why the dependency floor is mcp 2.1; 2.0
+replaced the detail with a generic `Error reading resource <uri>`.)
 
 Resources are a **user**-facing surface: in Claude Code the user `@`-mentions
 one (e.g. `@yandex-tracker:tracker://issue/TEST-123`) to attach it as context.
