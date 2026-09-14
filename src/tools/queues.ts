@@ -108,6 +108,7 @@ POST /v3/queues/{queueId}/_restore
 https://yandex.ru/support/tracker/en/api/queues/restore-queue.md
 
 Only an organization administrator can make this request.`,
+    effect: "modify",
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
@@ -184,6 +185,7 @@ https://yandex.ru/support/tracker/en/api/queues/delete-tag.md
 
 Only a Yandex Tracker administrator can remove tags, and only tags that are
 not used in any issue of the queue.`,
+    effect: "modify",
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
       tag: z.string().min(1).describe("Tag name."),

@@ -80,15 +80,25 @@ A tool is one endpoint, so adding one starts by opening its page.
      `version` as a query parameter, it belongs in `params` instead.
    - Body too open-ended to enumerate (the page says "the same format as when
      editing issues")? Take one `fields` record and spread it last.
+   - **`effect` only when the method misleads.** `tool()` reads the method out of
+     the description and turns it into the MCP annotations a host uses to decide
+     whether to ask the user: GET is `read`, POST is `create`, PATCH and DELETE
+     are `modify`. Add `effect: "read" | "create" | "modify"` after the
+     description when that is wrong — a `_search` POST that only reads, a GET
+     that downloads a file onto the caller's disk, a POST like `_move` or
+     `_start` that acts on an object that already exists. The exception list is
+     restated in `tests/tools.test.ts`, so adding one is two edits on purpose.
 
 3. **Regenerate the index**: `bun run docs:tools` rewrites the tables in
    [TOOLS.md](TOOLS.md) between its `<!-- tools:start -->` / `<!-- tools:end -->`
    markers and formats the result — commit whatever it changes. The preamble
    above the marker is hand-written; leave it alone. Do not copy Yandex's
    argument tables into the file either: the page is the reference.
-4. **Tests need nothing.** `tests/tools.test.ts` walks the registry, so a new
-   tool is covered the moment it is added — and fails immediately if its
-   description and its code disagree. Add a case there only for a deviation.
+4. **Tests need nothing**, unless you declared an `effect`.
+   `tests/tools.test.ts` walks the registry, so a new tool is covered the moment
+   it is added — and fails immediately if its description and its code disagree.
+   Add a case there only for a deviation; an `effect` override is one, and goes
+   in the table in "every tool tells the host what it does".
 
 ## Testing model
 

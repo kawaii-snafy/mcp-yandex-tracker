@@ -462,6 +462,7 @@ https://yandex.ru/support/tracker/en/api/issues/move-issue.md
 
 Nothing is moved when the issue's type or status does not exist in the target
 queue; local field values are always reset by the move.`,
+    effect: "modify",
     input: {
       issueId: z.string().min(1).describe("ID or key of the issue."),
       queue: z.string().min(1).describe("Key of the queue to move the issue to."),
@@ -526,6 +527,7 @@ returns error 400. Use paginated output below 10,000 rows and the scroll
 parameters above it; release a scroll snapshot with tracker_clear_scroll.
 \`perPage\` and \`page\` are the paginated-output parameters this page links to
 in https://yandex.ru/support/tracker/en/api/common-format.md.`,
+    effect: "read",
     input: {
       expand: z
         .string()
@@ -612,6 +614,7 @@ in https://yandex.ru/support/tracker/en/api/common-format.md.`,
 
 POST /v3/issues/_count
 https://yandex.ru/support/tracker/en/api/issues/count-issues.md`,
+    effect: "read",
     input: {
       filter: z
         .record(z.string(), z.unknown())
@@ -681,6 +684,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-suggest.md`,
 
 POST /v3/system/search/scroll/_clear
 https://yandex.ru/support/tracker/en/api/issues/search-release.md`,
+    effect: "modify",
     input: {
       fields: z
         .record(z.string(), z.unknown())
@@ -844,6 +848,7 @@ https://yandex.ru/support/tracker/en/api/issues/new-transition.md
 
 The response lists the transitions available in the NEW status, not the
 updated issue.`,
+    effect: "modify",
     input: {
       issueId: z.string().min(1).describe("ID or key of the issue."),
       transitionId: z.string().min(1).describe("Transition ID, from tracker_get_transitions."),
@@ -1132,6 +1137,7 @@ GET /v3/issues/{issueId}/attachments/{fileId}/{fileName}
 https://yandex.ru/support/tracker/en/api/issues/get-attachment.md
 
 Writes the file to \`destDir\` and returns {"path", "name", "size"}.`,
+    effect: "create",
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
       fileId: z.string().min(1).describe("Unique file ID, from tracker_get_attachments."),
@@ -1161,6 +1167,7 @@ GET /v3/issues/{issueId}/thumbnails/{fileId}
 https://yandex.ru/support/tracker/en/api/issues/get-attachment-preview.md
 
 Writes the thumbnail to \`destDir\` and returns {"path", "name", "size"}.`,
+    effect: "create",
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
       fileId: z
@@ -1371,6 +1378,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-worklog.md`,
 
 POST /v3/worklog/_search
 https://yandex.ru/support/tracker/en/api/issues/get-worklog.md`,
+    effect: "read",
     input: {
       createdBy: z.string().optional().describe("ID or username of the record author."),
       createdAt: z
@@ -1635,6 +1643,7 @@ https://yandex.ru/support/tracker/en/api/issues/create-report.md`,
 
 POST /v3/entities/report/_search
 https://yandex.ru/support/tracker/en/api/issues/search-reports.md`,
+    effect: "read",
     input: {
       filter: z
         .record(z.string(), z.unknown())

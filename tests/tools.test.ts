@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { Tracker } from "../src/client.ts";
-import type { ToolDef } from "../src/tool.ts";
+import type { ToolDef, ToolEffect } from "../src/tool.ts";
 import { allTools } from "../src/tools/index.ts";
 
 /**
@@ -129,6 +129,69 @@ describe("the tool surface is the documented API surface", () => {
   test("an argument the caller supplies is sent", async () => {
     const fake = await invoke(byName("tracker_get_users"), { perPage: 10 });
     expect(fake.last().params).toEqual({ perPage: 10 });
+  });
+});
+
+describe("every tool tells the host what it does", () => {
+  // Claude's connector review requires a title and a read-only or destructive
+  // hint on every tool; the hint is what decides whether the user is asked
+  // before each call. src/server.ts turns `effect` into both.
+  test("every tool has a title and an effect", () => {
+    for (const def of allTools) {
+      expect(def.title).not.toBe("");
+      expect(def.title).not.toContain("_");
+      expect(["read", "create", "modify"]).toContain(def.effect);
+    }
+  });
+
+  test("the effect matches the method unless the tool overrides it", () => {
+    // The exceptions are listed here rather than derived, so adding one is a
+    // deliberate edit: a search is a POST that changes nothing, a download is a
+    // GET that writes to the caller's disk, and a POST ending in `_move`,
+    // `_start` and friends acts on something that already exists.
+    const overrides: Record<string, ToolEffect> = {
+      tracker_search_issues: "read",
+      tracker_count_issues: "read",
+      tracker_search_entities: "read",
+      tracker_search_worklog: "read",
+      tracker_search_reports: "read",
+      tracker_get_attachment: "create",
+      tracker_get_attachment_preview: "create",
+      tracker_bulkchange_entities: "modify",
+      tracker_entity_move_checklist_item: "modify",
+      tracker_move_issue: "modify",
+      tracker_new_transition: "modify",
+      tracker_restore_queue: "modify",
+      tracker_delete_queue_tag: "modify",
+      tracker_archive_sprint: "modify",
+      tracker_start_sprint: "modify",
+      tracker_clear_scroll: "modify",
+    };
+    const byMethod: Record<string, ToolEffect> = {
+      GET: "read",
+      POST: "create",
+      PATCH: "modify",
+      DELETE: "modify",
+    };
+
+    for (const def of allTools) {
+      const [, method] = ENDPOINT.exec(def.description)!;
+      expect(`${def.name} ${def.effect}`).toBe(
+        `${def.name} ${overrides[def.name] ?? byMethod[method!]}`,
+      );
+    }
+  });
+
+  test("no tool that writes is advertised as read-only", () => {
+    // The hint that grants a standing permission, held to the one thing it must
+    // never cover: an endpoint that is not a GET, and is not one of the five
+    // documented searches, cannot be read.
+    const searches = allTools.filter((def) => def.effect === "read");
+    for (const def of searches) {
+      const [, method, path] = ENDPOINT.exec(def.description)!;
+      if (method === "GET") continue;
+      expect(`${def.name} ${path}`).toMatch(/(_search|_count)$/);
+    }
   });
 });
 

@@ -48,11 +48,11 @@ function render(): string {
   const lines: string[] = [];
   for (const [tools, title, blurb] of SECTIONS) {
     lines.push(`### ${title} — ${tools.length} tools\n`, `${blurb}\n`);
-    lines.push("| Tool | Endpoint | Documentation |", "| --- | --- | --- |");
+    lines.push("| Tool | Endpoint | Effect | Documentation |", "| --- | --- | --- | --- |");
     for (const def of tools) {
       const [, method, path] = ENDPOINT.exec(def.description)!;
       const [, url, page] = DOC_URL.exec(def.description)!;
-      lines.push(`| \`${def.name}\` | \`${method} ${path}\` | [${page}](${url}) |`);
+      lines.push(`| \`${def.name}\` | \`${method} ${path}\` | ${def.effect} | [${page}](${url}) |`);
     }
     lines.push("");
   }

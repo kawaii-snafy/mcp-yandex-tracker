@@ -264,6 +264,7 @@ https://yandex.ru/support/tracker/en/api/entities/search-entities.md
 
 Entity field keys and value keys, e.g., statuses, sometimes differ from
 similar issue keys.`,
+    effect: "read",
     input: {
       entityType: z.string().min(1).describe("Entity type: project, portfolio, goal."),
       input: z.string().optional().describe("Substring in the entity name."),
@@ -310,6 +311,7 @@ similar issue keys.`,
 
 POST /v3/entities/{entityType}/bulkchange/_update
 https://yandex.ru/support/tracker/en/api/entities/bulkchange-entities.md`,
+    effect: "modify",
     input: {
       entityType: z.string().min(1).describe("Entity type: project, portfolio, goal."),
       metaEntities: z.array(z.unknown()).describe("List of entity IDs."),
@@ -821,6 +823,7 @@ https://yandex.ru/support/tracker/en/api/entities/checklists/patch-checklist-ite
 
 POST /v3/entities/{entityType}/{entityId}/checklistItems/{checklistItemId}/_move
 https://yandex.ru/support/tracker/en/api/entities/checklists/move-checklist-item.md`,
+    effect: "modify",
     input: {
       entityType: z.string().min(1).describe("Entity type: project, portfolio."),
       entityId: z

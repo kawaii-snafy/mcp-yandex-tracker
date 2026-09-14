@@ -405,6 +405,7 @@ POST /v3/sprints/{sprintId}/_start
 https://yandex.ru/support/tracker/en/api/boards/start-sprint.md
 
 The current version is the \`version\` field returned by tracker_get_sprint.`,
+    effect: "modify",
     input: {
       sprintId: z.string().min(1).describe("Sprint ID."),
       version: z
@@ -429,6 +430,7 @@ POST /v3/sprints/{sprintId}/_archive
 https://yandex.ru/support/tracker/en/api/boards/archive-sprint.md
 
 The current version is the \`version\` field returned by tracker_get_sprint.`,
+    effect: "modify",
     input: {
       sprintId: z.string().min(1).describe("Sprint ID."),
       version: z

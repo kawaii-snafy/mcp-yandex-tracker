@@ -17,6 +17,10 @@
 - Tools are **data**: each is a `tool({ name, description, input, run })` entry in
   the array its `src/tools/<section>.ts` exports. The server, the tests and the
   `docs/TOOLS.md` generator all read that same registry.
+- Every tool ships a `title` and MCP annotations. Both are derived — the title
+  from the name, `readOnlyHint` / `destructiveHint` from the method in the
+  description — so add `effect` to a tool only when its method misleads (a
+  `_search` POST, a GET that downloads to disk, a `_move`-style POST).
 - Keep runtime dependencies minimal: only `@modelcontextprotocol/server` and
   `zod`. HTTP is the built-in `fetch`; there is no HTTP library.
 - **`any` is banned**, and so are `as` casts — the one that exists is in

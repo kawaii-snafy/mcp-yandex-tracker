@@ -37,9 +37,16 @@ capability negotiation) and `tools/list` / `tools/call` routing all come from
   server: the SDK pins one instance per protocol era per connection, so
   registration has to happen inside `buildServer` rather than as an import side
   effect.
-- Each tool is registered with `registerTool(name, { description, inputSchema },
-handler)`. `inputSchema` is a `ZodObject` built from the tool's `input` shape;
-  the SDK derives the advertised JSON Schema from it, `.describe()` text and all.
+- Each tool is registered with `registerTool(name, { title, description,
+inputSchema, annotations }, handler)`. `inputSchema` is a `ZodObject` built
+  from the tool's `input` shape; the SDK derives the advertised JSON Schema from
+  it, `.describe()` text and all.
+- `annotations` is how a host decides whether a call needs the user's
+  confirmation: `readOnlyHint` for the tools that only read, `destructiveHint`
+  for the ones that edit or delete, `openWorldHint` throughout because every
+  tool reaches a Tracker installation we know nothing about. They come from one
+  mapping over the tool's `effect`; `title` is not repeated inside them, since
+  the SDK's precedence is `title` → `annotations.title` → `name`.
 - No `outputSchema` is declared. That keeps responses token-lean — one compact
   JSON text block, no duplicating `structuredContent`, nothing extra in every
   `tools/list`.
@@ -73,6 +80,14 @@ The description is a contract, not prose: summary line, blank line,
 `<METHOD> /v3/<path>`, then the URL of the page the tool was written from. The
 test suite parses both halves and fails if a tool reaches an endpoint other than
 the one it claims.
+
+It has a fourth reader: `tool()` maps the method to the tool's `effect` (GET →
+`read`, POST → `create`, PATCH and DELETE → `modify`) and its name to a `title`,
+so neither is written out 149 times. Sixteen endpoints where the method misleads
+set `effect` in the literal — the five `_search` / `_count` POSTs that only read,
+the two attachment GETs that write a file to the caller's disk, and the POSTs
+(`_move`, `_execute`, `_start`, `_archive`, `_restore`, `_clear`, `tags/_remove`,
+`bulkchange/_update`) that act on something already there.
 
 ### Client lifecycle
 

@@ -91,7 +91,12 @@ Four cross-cutting mechanisms to know before editing:
   `tests/tools.test.ts` and by `scripts/gen-tools-doc.ts` alike.
 - **The description is a contract.** Summary line, blank line,
   `<METHOD> /v3/<path>`, then the documentation URL. The test suite parses both
-  and fails if a tool reaches a different endpoint than it claims.
+  and fails if a tool reaches a different endpoint than it claims. `tool()` also
+  reads the method back out of it to derive the tool's `effect` — `read`,
+  `create` or `modify` — which `buildServer` turns into the MCP annotations
+  (`readOnlyHint` / `destructiveHint`) a host uses to decide whether to ask the
+  user. Sixteen tools whose method misleads declare `effect` themselves; the
+  list is restated in `tests/tools.test.ts`.
 - **`Tracker.request(method, path, { params, body, headers })`** is the only way
   out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on idempotent methods,
   maps a transport failure to `TrackerApiError(0, …)` and any non-2xx to

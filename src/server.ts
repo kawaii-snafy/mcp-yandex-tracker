@@ -4,10 +4,25 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { Tracker } from "./client.ts";
 import { registerResources } from "./resources.ts";
+import type { ToolEffect } from "./tool.ts";
 import { allTools } from "./tools/index.ts";
 
 export const SERVER_NAME = "mcp-yandex-tracker";
 export const SERVER_VERSION = "1.0.0";
+
+/**
+ * How a tool's effect reads as MCP annotations.
+ *
+ * A host grants a read-only tool a standing permission and asks before a
+ * destructive one, so this mapping is what decides whether the user is
+ * interrupted on every search. `openWorldHint` is true throughout: every tool
+ * here reaches a Tracker installation we know nothing about.
+ */
+const ANNOTATIONS: Record<ToolEffect, { readOnlyHint: boolean; destructiveHint: boolean }> = {
+  read: { readOnlyHint: true, destructiveHint: false },
+  create: { readOnlyHint: false, destructiveHint: false },
+  modify: { readOnlyHint: false, destructiveHint: true },
+};
 
 let cached: Tracker | undefined;
 
@@ -37,7 +52,14 @@ export function buildServer(tracker: () => Tracker = getTracker): McpServer {
   for (const def of allTools) {
     server.registerTool(
       def.name,
-      { description: def.description, inputSchema: z.object(def.input) },
+      {
+        title: def.title,
+        description: def.description,
+        inputSchema: z.object(def.input),
+        // `title` above is the field a host reads first — the SDK's precedence
+        // is title → annotations.title → name — so it is not repeated here.
+        annotations: { openWorldHint: true, ...ANNOTATIONS[def.effect] },
+      },
       async (args) => ({
         // One compact JSON text block and no outputSchema: that keeps responses
         // token-lean (no duplicating structuredContent) and Cyrillic intact.

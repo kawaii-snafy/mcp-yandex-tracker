@@ -62,10 +62,24 @@ test("the built bundle serves the whole tool surface under node", async () => {
   expect(init.result.serverInfo).toEqual({ name: "mcp-yandex-tracker", version: "1.0.0" });
 
   const listed = messages.find((message) => message.id === 2) as {
-    result: { tools: { name: string }[] };
+    result: { tools: { name: string; title?: string; annotations?: Record<string, boolean> }[] };
   };
   expect(listed.result.tools).toHaveLength(allTools.length);
   expect(listed.result.tools.map((entry) => entry.name)).toContain("tracker_get_issue");
+
+  // The annotations a host reads to decide whether to ask the user, checked on
+  // the wire rather than in the registry: reading an issue runs unattended,
+  // deleting one does not.
+  for (const entry of listed.result.tools) {
+    expect(entry.title).toBeTruthy();
+    expect(entry.annotations).toBeDefined();
+  }
+  const byName = new Map(listed.result.tools.map((entry) => [entry.name, entry]));
+  expect(byName.get("tracker_get_issue")?.annotations).toMatchObject({ readOnlyHint: true });
+  expect(byName.get("tracker_delete_comment")?.annotations).toMatchObject({
+    readOnlyHint: false,
+    destructiveHint: true,
+  });
 });
 
 test("stdio preserves cyrillic", async () => {
