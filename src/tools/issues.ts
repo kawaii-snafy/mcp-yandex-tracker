@@ -163,7 +163,7 @@ https://yandex.ru/support/tracker/en/api/issues/response-fields.md.`,
         .string()
         .optional()
         .describe("Start date of work on the issue in the YYYY-MM-DD format."),
-      storyPoints: z.number().int().optional().describe("Issue estimate in story points."),
+      storyPoints: z.number().optional().describe("Issue estimate in story points."),
       fields: z
         .record(z.string(), z.unknown())
         .optional()
@@ -396,7 +396,7 @@ https://yandex.ru/support/tracker/en/api/issues/response-fields.md.`,
         .string()
         .optional()
         .describe("Start date of work on the issue in the YYYY-MM-DD format."),
-      storyPoints: z.number().int().optional().describe("Issue estimate in story points."),
+      storyPoints: z.number().optional().describe("Issue estimate in story points."),
       unique: z.string().optional().describe("Value that must be unique within the organization."),
       fields: z
         .record(z.string(), z.unknown())
@@ -522,9 +522,12 @@ queue; local field values are always reset by the move.`,
 POST /v3/issues/_search
 https://yandex.ru/support/tracker/en/api/issues/search-issues.md
 
-\`queue\`, \`keys\`, \`filter\` and \`query\` are mutually exclusive — combining them
-returns error 400. Use paginated output below 10,000 rows and the scroll
-parameters above it; release a scroll snapshot with tracker_clear_scroll.
+The page lists five ways to select the issues: \`queue\`, \`keys\`, \`filter\`,
+\`query\` and \`query2\`. Of these it states that \`queue\`, \`keys\`, \`filter\` and
+\`query\` are mutually exclusive — combining them returns error 400; it says
+nothing about combining \`query2\` with the rest, so send one selector at a
+time. Use paginated output below 10,000 rows and the scroll parameters above
+it; release a scroll snapshot with tracker_clear_scroll.
 \`perPage\` and \`page\` are the paginated-output parameters this page links to
 in https://yandex.ru/support/tracker/en/api/common-format.md.`,
     effect: "read",
@@ -1204,7 +1207,7 @@ The file appears on the issue's Attachments tab.`,
       filePath: z
         .string()
         .min(1)
-        .describe("Path to the local file to upload. Maximum size 1024 MB."),
+        .describe("Path to the local file to upload. Maximum size 1024 Mbit."),
       filename: z
         .string()
         .optional()
@@ -1231,7 +1234,7 @@ comment. Each temporary file ID can be used only once.`,
       filePath: z
         .string()
         .min(1)
-        .describe("Path to the local file to upload. Maximum size 1024 MB."),
+        .describe("Path to the local file to upload. Maximum size 1024 Mbit."),
       filename: z
         .string()
         .optional()

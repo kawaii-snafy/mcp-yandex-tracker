@@ -23,9 +23,7 @@ const description = z.string().describe("Project description. Not shown in the T
 const startDate = z.string().describe("Project start date in the YYYY-MM-DD format.");
 const endDate = z.string().describe("Project end date in the YYYY-MM-DD format.");
 
-const queues = z
-  .union([z.array(z.unknown()), z.string(), z.number().int()])
-  .describe("Queues whose issues belong to the project.");
+const queues = z.string().describe("Queues whose issues belong to the project.");
 
 /**
  * Every tool here has a successor in the `entities` API, which handles projects

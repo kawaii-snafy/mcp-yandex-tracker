@@ -559,7 +559,6 @@ https://yandex.ru/support/tracker/en/api/queues/workflows/patch-workflow-action.
       version: z
         .number()
         .int()
-        .optional()
         .describe(
           "Current workflow version, used to control concurrent changes. Get it with the request for a workflow.",
         ),

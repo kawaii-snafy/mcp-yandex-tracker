@@ -5,14 +5,20 @@ import { given } from "../client.ts";
 import { tool } from "../tool.ts";
 
 /**
- * The issue selector every bulk operation takes: a list of keys, or a filter in
- * the query language that Tracker resolves to one.
+ * The issue selector, in the two forms the pages document. `_update` takes a
+ * list of keys or a filter in the query language that Tracker resolves to one;
+ * `_move` and `_transition` document the list of keys alone, so they get the
+ * narrower type rather than the union.
  */
-const issues = z
+const issuesOrFilter = z
   .union([z.array(z.unknown()), z.string()])
   .describe(
     "Issues to change: an array of issue keys, or a filter in the query language. Up to 10,000 issues per operation.",
   );
+
+const issueKeys = z
+  .array(z.unknown())
+  .describe("Issues to change: an array of issue keys. Up to 10,000 issues per operation.");
 
 const notify = z
   .boolean()
@@ -39,7 +45,7 @@ Returns the bulk operation, not the issues: poll it with
 tracker_get_bulkchange and list its failures with tracker_get_bulkchange_issues.`,
     effect: "modify",
     input: {
-      issues,
+      issues: issuesOrFilter,
       values,
       notify,
     },
@@ -62,7 +68,7 @@ tracker_get_bulkchange and list its failures with tracker_get_bulkchange_issues.
     effect: "modify",
     input: {
       queue: z.string().min(1).describe("Key of the queue to move the issues to."),
-      issues,
+      issues: issueKeys,
       values: values.optional(),
       moveAllFields: z
         .boolean()
@@ -103,7 +109,7 @@ transition into a status such as Closed needs the resolution in \`values\`.`,
     effect: "modify",
     input: {
       transition: z.string().min(1).describe("ID of the transition to execute."),
-      issues,
+      issues: issueKeys,
       values: values.optional(),
       notify,
     },

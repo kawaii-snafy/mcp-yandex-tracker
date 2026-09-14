@@ -122,10 +122,11 @@ https://yandex.ru/support/tracker/en/api/entities/get-entity.md`,
 PATCH /v3/entities/{entityType}/{entityId}
 https://yandex.ru/support/tracker/en/api/entities/update-entity.md
 
-This is also the request that edits a goal's key results and an entity's
-metrics — see keyResultItems and metricItems:
+This is also the request that edits a goal's key results, an entity's metrics
+and its checklist — see keyResultItems, metricItems and checklistItems:
 https://yandex.ru/support/tracker/en/api/entities/keyresults.md
-https://yandex.ru/support/tracker/en/api/entities/metric.md`,
+https://yandex.ru/support/tracker/en/api/entities/metric.md
+https://yandex.ru/support/tracker/en/api/entities/checklists/add-checklist.md`,
     input: {
       entityType: z.string().min(1).describe("Entity type: project, portfolio, goal."),
       entityId: z
@@ -1164,7 +1165,7 @@ GET /v3/entities/{entityType}/{entityId}/extendedPermissions
 https://yandex.ru/support/tracker/en/api/entities/get-access.md
 
 Adds permissionSources — the parent entity the current one inherits access
-settings from — to the \`acl\` object.`,
+settings from — next to \`acl\` as a field of its own.`,
     input: {
       entityType: z.string().min(1).describe("Entity type: project, portfolio, goal."),
       entityId: z
