@@ -2,7 +2,7 @@
 .tmp/
 .clawpatch/
 .env
-dist/
+build/
 node_modules/
 *.tsbuildinfo
 __pycache__/

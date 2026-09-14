@@ -29,15 +29,16 @@ These are load-bearing; a change that breaks one is a regression.
    stderr. A stray `console.log` corrupts the stream and the host drops the
    connection.
 6. **Keep dependencies minimal.** The server imports `@modelcontextprotocol/server`
-   and `zod` and nothing else. Both sit in `devDependencies`: the build inlines
-   them, so the published package declares no dependencies at all and a host
-   downloads one file. Anything you add ends up inside that file — add it only
-   with a clear reason.
-7. **Type-check and test after any behavior change.** Node strips the types
-   without checking them, so `npm test` alone is not enough:
+   and `zod` and nothing else. `tsc` compiles rather than bundles, so both are
+   real `dependencies` and anything you add lands in every user's install — add
+   it only with a clear reason.
+7. **Type-check after any behavior change.** Node strips the types without
+   checking them, and there is no test suite to catch the difference:
    ```sh
-   npm run typecheck && npm test
+   npm run typecheck        # or npm run build — the same tsc, with emit
    ```
+   Then drive the server over stdio once; the smoke test is in the
+   [README](../README.md#verify-locally).
 
 ## Adding a tool
 
@@ -91,35 +92,30 @@ A tool is one endpoint, so adding one starts by opening its page.
      DELETE are `modify`. Add `effect: "read" | "create" | "modify"` after the
      description when that is wrong — a `_search` POST that only reads, a GET
      that downloads a file onto the caller's disk, a POST like `_move` or
-     `_start` that acts on an object that already exists. The exception list is
-     restated in `tests/tools.test.ts`, so adding one is two edits on purpose.
+     `_start` that acts on an object that already exists.
 
 3. **Regenerate the index**: `npm run docs:tools` rewrites the tables in
    [TOOLS.md](TOOLS.md) between its `<!-- tools:start -->` / `<!-- tools:end -->`
    markers and formats the result — commit whatever it changes. The preamble
    above the marker is hand-written; leave it alone. Do not copy Yandex's
    argument tables into the file either: the page is the reference.
-4. **Tests need nothing**, unless you declared an `effect`.
-   `tests/tools.test.ts` walks the registry, so a new tool is covered the moment
-   it is added — and fails immediately if its description and its code disagree.
-   Add a case there only for a deviation; an `effect` override is one, and goes
-   in the table in "every tool tells the host what it does".
+4. **Check it yourself.** There is no test suite, so the description and the
+   `run` body are kept in step by hand — re-read them together before you commit.
+   `npm run build` proves it compiles; `node build/cli.js` under the README's
+   smoke test proves it still lists.
 
-## Testing model
+## Checking a change
 
-The suite runs on fakes — no network, no real token — except for the last file,
-which runs the real built bundle with no credentials.
+There is no automated suite; two seams make manual checking cheap.
 
-- **`tests/client.test.ts`** injects a fake `fetch` via `new Tracker(config, fetchImpl)`
-  and asserts on the transport: URL building, auth and org headers, boolean
-  spelling, repeated query keys, non-2xx → `TrackerApiError`, `204` → `null`,
-  transport failure → status-0 error, streamed download, multipart upload.
-- **`tests/tools.test.ts`** is the centrepiece. It reads the endpoint out of each
-  tool's own description, synthesises the required arguments from the Zod shape,
-  and checks the tool really issues that method and path. One test covers the
-  whole surface.
-- **`tests/stdio.test.ts`** builds the bundle and drives `node dist/cli.js` over
-  real stdio. This is what proves the shipped artifact works as published.
+- `new Tracker(config, fetchImpl)` takes a `fetch`, so the transport can be
+  driven with a fake — URL building, auth and org headers, boolean spelling,
+  repeated query keys, non-2xx → `TrackerApiError`, `204` → `null`.
+- `buildServer(tracker)` takes the client getter, so the whole tool surface can
+  be exercised without a token.
+
+For the end-to-end path, run the README's stdio smoke test against
+`node build/cli.js` — that is the artifact users get.
 
 ## Scaling notes
 

@@ -1,17 +1,20 @@
 {
   "compilerOptions": {
-    // Node runs the TypeScript directly (type stripping) and esbuild bundles
-    // it, so nothing is ever emitted by tsc — it is here purely as the type
-    // checker (`npm run typecheck`). Imports carry their `.ts` extension
-    // because that is what Node's type stripping requires.
+    // `tsc` is both the type checker and the build: `npm run build` emits
+    // build/, `npm run typecheck` runs the same config with --noEmit.
+    "target": "ES2022",
     "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "Preserve",
-    "moduleResolution": "bundler",
-    "moduleDetection": "force",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "outDir": "./build",
+    "rootDir": "./src",
+
+    // Imports carry their `.ts` extension so that Node can run the sources
+    // directly by stripping the types; `rewriteRelativeImportExtensions`
+    // turns them into `.js` on the way out.
     "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true,
 
     // TypeScript 6 no longer picks up @types/* automatically.
     "types": ["node"],
@@ -22,5 +25,5 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src"]
 }

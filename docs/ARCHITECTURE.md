@@ -17,20 +17,35 @@ src/
     issues.ts  bulkchange.ts  imports.ts  filters.ts  queues.ts  macros.ts
     boards.ts  entities.ts  projects.ts  dashboards.ts  gaps.ts  admin.ts
     users.ts
-tests/          # node --test; fakes for the transport, the real bundle for stdio
-scripts/        # build.mjs, gen-tools-doc.ts
+scripts/        # gen-tools-doc.ts
 ```
 
 Tool modules mirror the sections of the official documentation, so a doc page
 maps to exactly one code file.
 
-The published artifact is `dist/cli.js`: one Node-compatible ESM bundle with a
-`#!/usr/bin/env node` banner, produced by esbuild (`scripts/build.mjs`). The two
-imports are inlined and the package therefore declares **no dependencies**, so a
-cold `npx -y mcp-yandex-tracker` fetches one package and runs — no resolution, no
-tree, no install step. That matters because that is exactly how a host launches
-it, and why `@modelcontextprotocol/server` and `zod` live in `devDependencies`:
-leaving them in `dependencies` would make every user download them twice over.
+## Build
+
+`tsc` is the whole build, the way the official
+[quickstart server](https://github.com/modelcontextprotocol/quickstart-resources/tree/main/weather-server-typescript)
+does it: `npm run build` compiles `src/` to `build/` and then marks
+`build/cli.js` executable, and `npm run typecheck` is the same config with
+`--noEmit`. There is no bundler and no second toolchain to keep in step.
+
+Two details make that work with sources Node can also run directly:
+`allowImportingTsExtensions` lets the imports keep their `.ts` extension, which
+is what Node's type stripping requires, and `rewriteRelativeImportExtensions`
+rewrites them to `.js` on emit. `#!/usr/bin/env node` sits at the top of
+`src/cli.ts`; `tsc` preserves it, so the published `bin` works under `npx`.
+
+`tsconfig.json` covers `src` only — `rootDir` and `outDir` make `build/` mirror
+it exactly. `scripts/gen-tools-doc.ts` is deliberately outside that config: it
+is a dev utility Node runs from source, and including it would push an extra
+directory level into `build/`.
+
+Because nothing is bundled, `@modelcontextprotocol/server` and `zod` are real
+`dependencies` and a host's `npx -y mcp-yandex-tracker` resolves them on first
+run. That is the price of dropping the bundler, and it is why the list of two
+is a design constraint rather than an accident.
 
 ## Protocol layer: the official MCP SDK
 
@@ -77,16 +92,15 @@ https://yandex.ru/support/tracker/en/api/issues/get-issue.md`,
 ```
 
 `tool()` infers the type of `run`'s `args` from `input`, so nothing is annotated
-by hand. Three consumers read the same array: `buildServer` registers it,
-`tests/tools.test.ts` checks every entry against its own description, and
+by hand. Two consumers read the same array: `buildServer` registers it, and
 `scripts/gen-tools-doc.ts` builds the index in [TOOLS.md](TOOLS.md).
 
 The description is a contract, not prose: summary line, blank line,
-`<METHOD> /v3/<path>`, then the URL of the page the tool was written from. The
-test suite parses both halves and fails if a tool reaches an endpoint other than
-the one it claims.
+`<METHOD> /v3/<path>`, then the URL of the page the tool was written from.
+Nothing enforces that the stated endpoint is the one `run` actually calls, so
+the pair is kept in step by hand.
 
-It has a fourth reader: `tool()` maps the method to the tool's `effect` (GET →
+It has a third reader: `tool()` maps the method to the tool's `effect` (GET →
 `read`, POST → `create`, PUT, PATCH and DELETE → `modify`) and its name to a
 `title`, so neither is written out once per tool. Twenty endpoints where the
 method misleads set `effect` in the literal — the six `_search` / `_count` POSTs
@@ -157,12 +171,12 @@ payload)`. The error body shape is _not_ documented anywhere in the API
   Tracker and has to be explained to the agent separately.
 - **stdout is protocol-only.** Anything written to stdout corrupts the MCP stream.
 - **Minimal dependencies.** The server imports `@modelcontextprotocol/server`
-  and `zod`; both are `devDependencies`, inlined by the build, so the published
-  package declares none.
+  and `zod` and nothing else. Nothing is bundled, so both are real
+  `dependencies` — every addition lands in every user's install.
 - **Types are inferred, never asserted.** `any` and `as` are banned; the single
   cast in the project is in `src/tool.ts` and is explained there. Node strips the
   types without checking them, so `npm run typecheck` is a required step, not a
   nicety.
-- **Testability by injection.** `buildServer` takes the client getter and
-  `Tracker` takes a `fetch`, so the whole stack runs against fakes with no
+- **Injectable seams.** `buildServer` takes the client getter and `Tracker`
+  takes a `fetch`, so the whole stack can be driven against fakes with no
   network.

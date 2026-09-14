@@ -28,11 +28,11 @@ YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
 To run from a clone instead, build it (`npm run build`) and point the host at
-the bundle:
+the entry point:
 
 ```toml
 command = "node"
-args = ["/path/to/mcp-yandex-tracker/dist/cli.js"]
+args = ["/path/to/mcp-yandex-tracker/build/cli.js"]
 ```
 
 For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
@@ -120,10 +120,16 @@ cd mcp-yandex-tracker
 npm install
 
 npm run typecheck   # tsc --noEmit — Node strips the types without checking them
-npm test            # the last file builds the bundle and drives it under node
-npm run build       # dist/cli.js
+npm run build       # tsc → build/, then chmod +x build/cli.js
+npm run lint        # eslint
+npm run format      # prettier --write
+npm run docs:tools  # regenerate the docs/TOOLS.md tables
+
+node src/cli.ts     # run from source
+node build/cli.js   # run the compiled entry point
 ```
 
 Node runs the TypeScript sources directly, so development needs Node 22.18 or
-newer. **The published package does not**: `dist/cli.js` is a single bundle with
-a `#!/usr/bin/env node` shebang, so `npx` works on a machine with only Node 20+.
+newer. **The published package does not**: `build/` is plain JavaScript and
+`build/cli.js` carries a `#!/usr/bin/env node` shebang, so `npx` works on a
+machine with only Node 20+.
