@@ -13,19 +13,24 @@ src/
   tool.ts       # the ToolDef type and the tool() helper
   resources.ts  # the read-only tracker:// surface
   tools/
-    index.ts    # allTools — the six arrays below, concatenated
-    issues.ts  queues.ts  boards.ts  entities.ts  admin.ts  users.ts
-tests/          # bun test; fakes for the transport, the real bundle for stdio
-scripts/        # gen-tools-doc.ts
+    index.ts    # allTools — the thirteen arrays below, concatenated
+    issues.ts  bulkchange.ts  imports.ts  filters.ts  queues.ts  macros.ts
+    boards.ts  entities.ts  projects.ts  dashboards.ts  gaps.ts  admin.ts
+    users.ts
+tests/          # node --test; fakes for the transport, the real bundle for stdio
+scripts/        # build.mjs, gen-tools-doc.ts
 ```
 
 Tool modules mirror the sections of the official documentation, so a doc page
 maps to exactly one code file.
 
 The published artifact is `dist/cli.js`: one Node-compatible ESM bundle with a
-`#!/usr/bin/env node` banner, produced by `bun build --target node`. Dependencies
-are bundled in, so a cold `npx -y mcp-yandex-tracker` has no dependency tree to
-install — which matters because that is exactly how a host launches it.
+`#!/usr/bin/env node` banner, produced by esbuild (`scripts/build.mjs`). The two
+imports are inlined and the package therefore declares **no dependencies**, so a
+cold `npx -y mcp-yandex-tracker` fetches one package and runs — no resolution, no
+tree, no install step. That matters because that is exactly how a host launches
+it, and why `@modelcontextprotocol/server` and `zod` live in `devDependencies`:
+leaving them in `dependencies` would make every user download them twice over.
 
 ## Protocol layer: the official MCP SDK
 
@@ -82,12 +87,13 @@ test suite parses both halves and fails if a tool reaches an endpoint other than
 the one it claims.
 
 It has a fourth reader: `tool()` maps the method to the tool's `effect` (GET →
-`read`, POST → `create`, PATCH and DELETE → `modify`) and its name to a `title`,
-so neither is written out 149 times. Sixteen endpoints where the method misleads
-set `effect` in the literal — the five `_search` / `_count` POSTs that only read,
-the two attachment GETs that write a file to the caller's disk, and the POSTs
-(`_move`, `_execute`, `_start`, `_archive`, `_restore`, `_clear`, `tags/_remove`,
-`bulkchange/_update`) that act on something already there.
+`read`, POST → `create`, PUT, PATCH and DELETE → `modify`) and its name to a
+`title`, so neither is written out once per tool. Twenty endpoints where the
+method misleads set `effect` in the literal — the six `_search` / `_count` POSTs
+that only read, the two attachment GETs that write a file to the caller's disk,
+and the POSTs (`_move`, `_execute`, `_start`, `_archive`, `_restore`, `_clear`,
+`tags/_remove`, `bulkchange/_update`, `bulkchange/_transition`) that act on
+something already there.
 
 ### Client lifecycle
 
@@ -113,7 +119,7 @@ same data, so resources are additive, never a replacement.
 
 `client.ts` is the entire Tracker side, and it is deliberately small. There is no
 HTTP library: `fetch`, `FormData`, `File` and `AbortSignal.timeout` are built
-into both Node 20+ and Bun.
+into Node 20+.
 
 - **Config** — `configFromEnv()` reads the environment and validates that a token
   and one org id are present. `apiRoot()` always ends in `/v3`: the version
@@ -150,11 +156,13 @@ payload)`. The error body shape is _not_ documented anywhere in the API
   filtering: anything the server invents is a place where it can drift from
   Tracker and has to be explained to the agent separately.
 - **stdout is protocol-only.** Anything written to stdout corrupts the MCP stream.
-- **Minimal dependencies.** Runtime dependencies are
-  `@modelcontextprotocol/server` and `zod`.
+- **Minimal dependencies.** The server imports `@modelcontextprotocol/server`
+  and `zod`; both are `devDependencies`, inlined by the build, so the published
+  package declares none.
 - **Types are inferred, never asserted.** `any` and `as` are banned; the single
-  cast in the project is in `src/tool.ts` and is explained there. Bun does not
-  type-check, so `bun run typecheck` is a required step, not a nicety.
+  cast in the project is in `src/tool.ts` and is explained there. Node strips the
+  types without checking them, so `npm run typecheck` is a required step, not a
+  nicety.
 - **Testability by injection.** `buildServer` takes the client getter and
   `Tracker` takes a `fetch`, so the whole stack runs against fakes with no
   network.

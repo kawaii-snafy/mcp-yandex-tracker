@@ -2,9 +2,11 @@
 
 A stdio MCP server that puts the whole [Yandex Tracker REST API
 v3](https://yandex.ru/support/tracker/en/llms.txt) in front of an LLM agent —
-issues, comments, checklists, attachments, worklog, links and transitions;
-queues, local fields, workflows, triggers and components; boards, columns and
-sprints; projects, portfolios and goals; users and the reference dictionaries.
+issues, comments, checklists, attachments, worklog, links and transitions; bulk
+operations and imports from another tracker; queues, macros, local fields,
+workflows, triggers and components; boards, columns and sprints; projects,
+portfolios and goals; saved filters, dashboards, absences, users and the
+reference dictionaries.
 
 It is a thin wrapper on purpose: **one tool per documented endpoint**, the API's
 own parameter names on the way in, the API's own JSON on the way out. Every
@@ -25,7 +27,7 @@ YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
-To run from a clone instead, build it (`bun run build`) and point the host at
+To run from a clone instead, build it (`npm run build`) and point the host at
 the bundle:
 
 ```toml
@@ -103,7 +105,7 @@ to stderr).
 
 ## Documentation
 
-Deeper docs live in [`docs/`](docs/README.md):
+Deeper docs live in [`docs/`](docs/INDEX.md):
 
 - [INTEGRATION.md](docs/INTEGRATION.md) — connect the server to a host.
 - [TOOLS.md](docs/TOOLS.md) — every tool, its endpoint, and its doc page.
@@ -115,13 +117,13 @@ Deeper docs live in [`docs/`](docs/README.md):
 ```sh
 git clone git@github.com:kawaii-snafy/mcp-yandex-tracker.git
 cd mcp-yandex-tracker
-bun install
+npm install
 
-bun run typecheck   # tsc --noEmit — Bun transpiles without checking types
-bun test            # the last file builds the bundle and drives it under node
-bun run build       # dist/cli.js
+npm run typecheck   # tsc --noEmit — Node strips the types without checking them
+npm test            # the last file builds the bundle and drives it under node
+npm run build       # dist/cli.js
 ```
 
-Development uses [Bun](https://bun.com); **running the published package does
-not** — `dist/cli.js` is a single Node-compatible bundle with a
-`#!/usr/bin/env node` shebang, so `npx` works on a machine with only Node 20+.
+Node runs the TypeScript sources directly, so development needs Node 22.18 or
+newer. **The published package does not**: `dist/cli.js` is a single bundle with
+a `#!/usr/bin/env node` shebang, so `npx` works on a machine with only Node 20+.

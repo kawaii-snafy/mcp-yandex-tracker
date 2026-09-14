@@ -21,7 +21,7 @@ import type { Tracker } from "./client.ts";
 export type ToolEffect = "read" | "create" | "modify";
 
 /** The endpoint line every description carries: `<METHOD> /v3/<path>`. */
-const ENDPOINT = /^(GET|POST|PATCH|DELETE) (\/v3\/\S*)$/m;
+const ENDPOINT = /^(GET|POST|PUT|PATCH|DELETE) (\/v3\/\S*)$/m;
 
 /**
  * The effect the HTTP method implies, which is right for all but a handful of
@@ -32,6 +32,7 @@ const ENDPOINT = /^(GET|POST|PATCH|DELETE) (\/v3\/\S*)$/m;
 const EFFECT_BY_METHOD: Record<string, ToolEffect> = {
   GET: "read",
   POST: "create",
+  PUT: "modify",
   PATCH: "modify",
   DELETE: "modify",
 };
@@ -43,7 +44,7 @@ export function parseEndpoint(description: string): { method: string; path: stri
 }
 
 /**
- * `tracker_get_issue` → `Get issue`. Derived rather than written out 149 times:
+ * `tracker_get_issue` → `Get issue`. Derived rather than written out per tool:
  * the title is a label for the host's UI, and the name already says what the
  * endpoint is. The sentence explaining it is the description's job.
  */

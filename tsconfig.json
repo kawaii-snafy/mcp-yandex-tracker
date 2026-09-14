@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
-    // Bun runs and bundles the TypeScript directly, so nothing is ever emitted
-    // by tsc — it is here purely as the type checker (`bun run typecheck`).
+    // Node runs the TypeScript directly (type stripping) and esbuild bundles
+    // it, so nothing is ever emitted by tsc — it is here purely as the type
+    // checker (`npm run typecheck`). Imports carry their `.ts` extension
+    // because that is what Node's type stripping requires.
     "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
@@ -12,7 +14,7 @@
     "noEmit": true,
 
     // TypeScript 6 no longer picks up @types/* automatically.
-    "types": ["bun", "node"],
+    "types": ["node"],
 
     "strict": true,
     "skipLibCheck": true,

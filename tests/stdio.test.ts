@@ -1,6 +1,8 @@
-import { beforeAll, expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { before, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { allTools } from "../src/tools/index.ts";
 
 const CLI = "dist/cli.js";
@@ -8,7 +10,7 @@ const CLI = "dist/cli.js";
 /**
  * Drive the *built* bundle the way a host does: `node dist/cli.js`, newline
  * delimited JSON-RPC over stdio. This is the only test that proves the shipped
- * artifact works on a machine without Bun — and the one that would catch the
+ * artifact works as published — and the one that would catch the
  * bundler falling out with the SDK.
  */
 async function talk(requests: unknown[]): Promise<Record<string, unknown>[]> {
@@ -27,7 +29,9 @@ async function talk(requests: unknown[]): Promise<Record<string, unknown>[]> {
   });
 
   for (const request of requests) child.stdin.write(`${JSON.stringify(request)}\n`);
-  await Promise.race([done, Bun.sleep(15_000)]);
+  // `ref: false` so the timeout never holds the test process open once the
+  // conversation is over; it is a ceiling, not a wait.
+  await Promise.race([done, delay(15_000, undefined, { ref: false })]);
   child.kill();
   return messages;
 }
@@ -50,33 +54,38 @@ const HANDSHAKE = [
   { jsonrpc: "2.0", method: "notifications/initialized" },
 ];
 
-beforeAll(async () => {
-  const build = Bun.spawn(["bun", "run", "build"], { stdout: "ignore", stderr: "inherit" });
-  expect(await build.exited).toBe(0);
+before(async () => {
+  // The suite tests the artifact, so it builds it first rather than trusting
+  // whatever dist/ happens to hold.
+  const build = spawn("node", ["scripts/build.mjs"], { stdio: ["ignore", "ignore", "inherit"] });
+  const code = await new Promise<number | null>((resolve) => build.on("exit", resolve));
+  assert.equal(code, 0);
 });
 
 test("the built bundle serves the whole tool surface under node", async () => {
   const messages = await talk([...HANDSHAKE, { jsonrpc: "2.0", id: 2, method: "tools/list" }]);
 
   const init = messages.find((message) => message.id === 1) as { result: Record<string, unknown> };
-  expect(init.result.serverInfo).toEqual({ name: "mcp-yandex-tracker", version: "1.0.0" });
+  assert.deepEqual(init.result.serverInfo, { name: "mcp-yandex-tracker", version: "1.0.0" });
 
   const listed = messages.find((message) => message.id === 2) as {
     result: { tools: { name: string; title?: string; annotations?: Record<string, boolean> }[] };
   };
-  expect(listed.result.tools).toHaveLength(allTools.length);
-  expect(listed.result.tools.map((entry) => entry.name)).toContain("tracker_get_issue");
+  assert.equal(listed.result.tools.length, allTools.length);
+  assert.ok(listed.result.tools.map((entry) => entry.name).includes("tracker_get_issue"));
 
   // The annotations a host reads to decide whether to ask the user, checked on
   // the wire rather than in the registry: reading an issue runs unattended,
   // deleting one does not.
   for (const entry of listed.result.tools) {
-    expect(entry.title).toBeTruthy();
-    expect(entry.annotations).toBeDefined();
+    assert.ok(entry.title);
+    assert.notEqual(entry.annotations, undefined);
   }
   const byName = new Map(listed.result.tools.map((entry) => [entry.name, entry]));
-  expect(byName.get("tracker_get_issue")?.annotations).toMatchObject({ readOnlyHint: true });
-  expect(byName.get("tracker_delete_comment")?.annotations).toMatchObject({
+  assert.partialDeepStrictEqual(byName.get("tracker_get_issue")?.annotations, {
+    readOnlyHint: true,
+  });
+  assert.partialDeepStrictEqual(byName.get("tracker_delete_comment")?.annotations, {
     readOnlyHint: false,
     destructiveHint: true,
   });
@@ -90,5 +99,5 @@ test("stdio preserves cyrillic", async () => {
     ...HANDSHAKE,
     { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: {} } },
   ]);
-  expect(JSON.stringify(messages.find((message) => message.id === 2))).toContain(name);
+  assert.ok(JSON.stringify(messages.find((message) => message.id === 2)).includes(name));
 });

@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents.
 It is a deliberately thin wrapper: **one tool per documented endpoint**, the API's
-own parameter names on the way in, the API's own JSON on the way out. TypeScript,
-developed with Bun, built to a single Node-compatible bundle, published to npm.
+own parameter names on the way in, the API's own JSON on the way out. TypeScript
+on Node, bundled by esbuild into a single Node-compatible file, published to npm.
 There is no HTTP/SSE transport — one process serves one client over stdin/stdout.
 
 ## The rule that governs every other decision
@@ -27,23 +27,26 @@ undocumented, that is a deviation: record it in `docs/TOOLS.md` with the reason.
 ## Commands
 
 ```sh
-bun install
+npm install
 
-bun test                     # everything (the last file drives the built bundle)
-bun test tests/client.test.ts
-bun test -t "builds a v3 url"
+npm test                     # everything (the last file drives the built bundle)
+node --test tests/client.test.ts
+node --test --test-name-pattern "builds a v3 url" tests/*.test.ts
 
-bun run typecheck            # tsc --noEmit — Bun transpiles without checking types
-bun run lint                 # eslint
-bun run format               # prettier --write
-bun run build                # dist/cli.js, a single Node-compatible ESM bundle
-bun run docs:tools           # regenerate the docs/TOOLS.md tables
+npm run typecheck            # tsc --noEmit — Node strips the types, it does not check them
+npm run lint                 # eslint
+npm run format               # prettier --write
+npm run build                # dist/cli.js, a single Node-compatible ESM bundle
+npm run docs:tools           # regenerate the docs/TOOLS.md tables
 
-bun run src/cli.ts           # run from source
+node src/cli.ts              # run from source
 node dist/cli.js             # run the shipped artifact
 ```
 
-Always run `bun run typecheck` and `bun test` after changing behavior.
+Node runs the TypeScript sources directly by stripping the types, which needs
+Node 22.18 or newer for development; the published bundle still runs on Node 20.
+
+Always run `npm run typecheck` and `npm test` after changing behavior.
 
 Smoke-test without a host — MCP requires the `initialize` handshake before any
 other request, so send it (and the `initialized` notification) first:
@@ -77,7 +80,9 @@ src/
   client.ts    # config, errors, Tracker over fetch — the whole Tracker side
   tool.ts      # the ToolDef type and the tool() helper
   resources.ts # the read-only tracker:// surface
-  tools/       # issues.ts queues.ts boards.ts entities.ts admin.ts users.ts
+  tools/       # issues.ts bulkchange.ts imports.ts filters.ts queues.ts
+               # macros.ts boards.ts entities.ts projects.ts dashboards.ts
+               # gaps.ts admin.ts users.ts
 ```
 
 Tool modules mirror the sections of the documentation, so a doc page maps to
@@ -95,7 +100,7 @@ Four cross-cutting mechanisms to know before editing:
   reads the method back out of it to derive the tool's `effect` — `read`,
   `create` or `modify` — which `buildServer` turns into the MCP annotations
   (`readOnlyHint` / `destructiveHint`) a host uses to decide whether to ask the
-  user. Sixteen tools whose method misleads declare `effect` themselves; the
+  user. Twenty tools whose method misleads declare `effect` themselves; the
   list is restated in `tests/tools.test.ts`.
 - **`Tracker.request(method, path, { params, body, headers })`** is the only way
   out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on idempotent methods,
@@ -114,17 +119,18 @@ Four cross-cutting mechanisms to know before editing:
   client-side pagination, no convenience tools that compose several calls. If a
   response is too big, trim it with the API's own `fields` / `expand`.
 - **No second HTTP path.** All Tracker access goes through `Tracker.request()`.
-  Runtime deps stay at `@modelcontextprotocol/server` + `zod`.
+  Imports stay at `@modelcontextprotocol/server` + `zod`, both `devDependencies`
+  that esbuild inlines — the published package declares no dependencies.
 - **No `any`, no `as`.** The single cast in the project lives in `src/tool.ts`
   and is explained there.
 - **stdout is protocol-only.** Never write to stdout — it corrupts the MCP stream.
-- **Keep `docs/TOOLS.md` in sync**: `bun run docs:tools` after changing a tool.
+- **Keep `docs/TOOLS.md` in sync**: `npm run docs:tools` after changing a tool.
 
 ## Adding a tool
 
 Find the endpoint's page in `llms.txt`, read the `.md`, and add one `tool({...})`
 entry to the matching `src/tools/` array — description as summary, blank line,
-`<METHOD> /v3/<path>`, page URL. Then `bun run docs:tools`. See
+`<METHOD> /v3/<path>`, page URL. Then `npm run docs:tools`. See
 `docs/EXTENDING.md` for the full pattern and the naming conventions.
 
 ## Further docs

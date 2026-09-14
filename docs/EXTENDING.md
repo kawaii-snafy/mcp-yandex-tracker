@@ -28,12 +28,15 @@ These are load-bearing; a change that breaks one is a regression.
 5. **Never write to stdout.** stdout is the JSON-RPC channel. Diagnostics go to
    stderr. A stray `console.log` corrupts the stream and the host drops the
    connection.
-6. **Keep dependencies minimal.** The runtime dependencies are
-   `@modelcontextprotocol/server` and `zod`. Add another only with a clear reason.
-7. **Type-check and test after any behavior change.** Bun transpiles without
-   checking types, so `bun test` alone is not enough:
+6. **Keep dependencies minimal.** The server imports `@modelcontextprotocol/server`
+   and `zod` and nothing else. Both sit in `devDependencies`: the build inlines
+   them, so the published package declares no dependencies at all and a host
+   downloads one file. Anything you add ends up inside that file — add it only
+   with a clear reason.
+7. **Type-check and test after any behavior change.** Node strips the types
+   without checking them, so `npm test` alone is not enough:
    ```sh
-   bun run typecheck && bun test
+   npm run typecheck && npm test
    ```
 
 ## Adding a tool
@@ -44,8 +47,10 @@ A tool is one endpoint, so adding one starts by opening its page.
    the `.md` version. Note the method, the exact path (including whether the doc
    writes a trailing slash), every query parameter, and every body field.
 2. **Add one entry** to the array in the `src/tools/` module that matches the
-   page's section. Transcribe the parameters — same names, documented types,
-   descriptions taken from the page:
+   page's section. A section with no module yet gets a new file exporting its own
+   array, wired into `src/tools/index.ts` and into `SECTIONS` in
+   `scripts/gen-tools-doc.ts`. Transcribe the parameters — same names, documented
+   types, descriptions taken from the page:
 
    ```ts
    tool({
@@ -82,14 +87,14 @@ A tool is one endpoint, so adding one starts by opening its page.
      editing issues")? Take one `fields` record and spread it last.
    - **`effect` only when the method misleads.** `tool()` reads the method out of
      the description and turns it into the MCP annotations a host uses to decide
-     whether to ask the user: GET is `read`, POST is `create`, PATCH and DELETE
-     are `modify`. Add `effect: "read" | "create" | "modify"` after the
+     whether to ask the user: GET is `read`, POST is `create`, PUT, PATCH and
+     DELETE are `modify`. Add `effect: "read" | "create" | "modify"` after the
      description when that is wrong — a `_search` POST that only reads, a GET
      that downloads a file onto the caller's disk, a POST like `_move` or
      `_start` that acts on an object that already exists. The exception list is
      restated in `tests/tools.test.ts`, so adding one is two edits on purpose.
 
-3. **Regenerate the index**: `bun run docs:tools` rewrites the tables in
+3. **Regenerate the index**: `npm run docs:tools` rewrites the tables in
    [TOOLS.md](TOOLS.md) between its `<!-- tools:start -->` / `<!-- tools:end -->`
    markers and formats the result — commit whatever it changes. The preamble
    above the marker is hand-written; leave it alone. Do not copy Yandex's
@@ -114,7 +119,7 @@ which runs the real built bundle with no credentials.
   and checks the tool really issues that method and path. One test covers the
   whole surface.
 - **`tests/stdio.test.ts`** builds the bundle and drives `node dist/cli.js` over
-  real stdio. This is what proves the shipped artifact works without Bun.
+  real stdio. This is what proves the shipped artifact works as published.
 
 ## Scaling notes
 

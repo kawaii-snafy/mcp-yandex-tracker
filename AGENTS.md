@@ -21,14 +21,17 @@
   from the name, `readOnlyHint` / `destructiveHint` from the method in the
   description — so add `effect` to a tool only when its method misleads (a
   `_search` POST, a GET that downloads to disk, a `_move`-style POST).
-- Keep runtime dependencies minimal: only `@modelcontextprotocol/server` and
-  `zod`. HTTP is the built-in `fetch`; there is no HTTP library.
+- Keep dependencies minimal: only `@modelcontextprotocol/server` and `zod`, and
+  both are `devDependencies` because esbuild inlines them into `dist/cli.js` —
+  the published package declares none, so a host installs one file. Adding a
+  runtime import means adding to what every user downloads. HTTP is the built-in
+  `fetch`; there is no HTTP library.
 - **`any` is banned**, and so are `as` casts — the one that exists is in
   `src/tool.ts` and is explained there. Let types be inferred.
 - Do not print logs to stdout; MCP stdio stdout must contain only JSON-RPC
   messages. Diagnostics go to stderr.
-- **Bun does not type-check.** Run `bun run typecheck` (tsc) as well as
-  `bun test` after changing behavior.
+- **Node does not type-check.** It strips the types and runs, so `npm run
+typecheck` (tsc) is as necessary as `npm test` after changing behavior.
 - See `docs/` for the full guide: `EXTENDING.md` (adding tools, rules, scaling),
   `ARCHITECTURE.md` (internals), `TOOLS.md` (the tool index), `INTEGRATION.md`
-  (connecting hosts). `docs/TOOLS.md` is generated — `bun run docs:tools`.
+  (connecting hosts). `docs/TOOLS.md` is generated — `npm run docs:tools`.

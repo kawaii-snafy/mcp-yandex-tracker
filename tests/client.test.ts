@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -52,8 +53,8 @@ function client(...responses: Response[]) {
 
 describe("config", () => {
   test("requires a token and one org id", () => {
-    expect(() => configFromEnv({})).toThrow(TrackerConfigError);
-    expect(() => configFromEnv({ YANDEX_TRACKER_TOKEN: "tkn" })).toThrow(TrackerConfigError);
+    assert.throws(() => configFromEnv({}), TrackerConfigError);
+    assert.throws(() => configFromEnv({ YANDEX_TRACKER_TOKEN: "tkn" }), TrackerConfigError);
   });
 
   test("reads every supported variable", () => {
@@ -64,52 +65,52 @@ describe("config", () => {
       YANDEX_TRACKER_BASE_URL: "https://tracker.example/",
       YANDEX_TRACKER_TIMEOUT: "5",
     });
-    expect(parsed.cloudOrgId).toBe("cloud-1");
-    expect(parsed.authScheme).toBe("Bearer");
-    expect(parsed.baseUrl).toBe("https://tracker.example");
-    expect(parsed.timeout).toBe(5000);
+    assert.equal(parsed.cloudOrgId, "cloud-1");
+    assert.equal(parsed.authScheme, "Bearer");
+    assert.equal(parsed.baseUrl, "https://tracker.example");
+    assert.equal(parsed.timeout, 5000);
   });
 
   test("always targets v3, whatever the configured host ends with", () => {
     // A /v2 or /v3 suffix left over in an old config is dropped: the version
     // belongs to the path this client builds, not to the configured host.
     for (const baseUrl of ["https://api.tracker.yandex.net", "https://api.tracker.yandex.net/v2"]) {
-      expect(apiRoot(config({ baseUrl }))).toBe("https://api.tracker.yandex.net/v3");
+      assert.equal(apiRoot(config({ baseUrl })), "https://api.tracker.yandex.net/v3");
     }
   });
 
   test("sends the OAuth scheme and the plain org header", () => {
     const headers = authHeaders(config());
-    expect(headers.Authorization).toBe("OAuth tkn");
-    expect(headers["X-Org-Id"]).toBe("42");
-    expect(headers["X-Cloud-Org-Id"]).toBeUndefined();
+    assert.equal(headers.Authorization, "OAuth tkn");
+    assert.equal(headers["X-Org-Id"], "42");
+    assert.equal(headers["X-Cloud-Org-Id"], undefined);
   });
 
   test("cloud org wins and Bearer passes through", () => {
     const headers = authHeaders(config({ cloudOrgId: "cloud-1", authScheme: "Bearer" }));
-    expect(headers.Authorization).toBe("Bearer tkn");
-    expect(headers["X-Cloud-Org-Id"]).toBe("cloud-1");
-    expect(headers["X-Org-Id"]).toBeUndefined();
+    assert.equal(headers.Authorization, "Bearer tkn");
+    assert.equal(headers["X-Cloud-Org-Id"], "cloud-1");
+    assert.equal(headers["X-Org-Id"], undefined);
   });
 });
 
 describe("helpers", () => {
   test("given drops only undefined", () => {
-    expect(given({ a: 1, b: undefined, c: false, d: "" })).toEqual({ a: 1, c: false, d: "" });
+    assert.deepEqual(given({ a: 1, b: undefined, c: false, d: "" }), { a: 1, c: false, d: "" });
   });
 
   test("ifMatch quotes the version and disappears when unset", () => {
-    expect(ifMatch(7)).toEqual({ "If-Match": '"7"' });
-    expect(ifMatch(undefined)).toBeUndefined();
+    assert.deepEqual(ifMatch(7), { "If-Match": '"7"' });
+    assert.equal(ifMatch(undefined), undefined);
   });
 });
 
 describe("request", () => {
   test("builds a v3 url", async () => {
     const { tracker, f } = client(Response.json({ key: "TEST-1" }));
-    expect(await tracker.request("GET", "/issues/TEST-1")).toEqual({ key: "TEST-1" });
-    expect(f.last().url).toBe("https://api.tracker.yandex.net/v3/issues/TEST-1");
-    expect(f.last().method).toBe("GET");
+    assert.deepEqual(await tracker.request("GET", "/issues/TEST-1"), { key: "TEST-1" });
+    assert.equal(f.last().url, "https://api.tracker.yandex.net/v3/issues/TEST-1");
+    assert.equal(f.last().method, "GET");
   });
 
   test("sends params and a json body", async () => {
@@ -118,9 +119,9 @@ describe("request", () => {
       params: { perPage: 5 },
       body: { queue: "TEST" },
     });
-    expect(f.last().url).toBe("https://api.tracker.yandex.net/v3/issues/_search?perPage=5");
-    expect(f.last().body).toBe('{"queue":"TEST"}');
-    expect(f.last().headers["Content-Type"]).toBe("application/json");
+    assert.equal(f.last().url, "https://api.tracker.yandex.net/v3/issues/_search?perPage=5");
+    assert.equal(f.last().body, '{"queue":"TEST"}');
+    assert.equal(f.last().headers["Content-Type"], "application/json");
   });
 
   test("booleans go out lowercase", async () => {
@@ -128,9 +129,9 @@ describe("request", () => {
     // documented boolean parameter is a JSON boolean.
     const { tracker, f } = client();
     await tracker.request("POST", "/issues/", { params: { notify: false } });
-    expect(f.last().url).toEndWith("?notify=false");
+    assert.ok(f.last().url.endsWith("?notify=false"));
     await tracker.request("GET", "/priorities", { params: { localized: true } });
-    expect(f.last().url).toEndWith("?localized=true");
+    assert.ok(f.last().url.endsWith("?localized=true"));
   });
 
   test("a list parameter becomes a repeated key", async () => {
@@ -138,23 +139,23 @@ describe("request", () => {
     await tracker.request("GET", "/worklog", {
       params: { createdAt: ["from:2026-01-01", "to:2026-12-31"] },
     });
-    expect(f.last().url).toEndWith("?createdAt=from%3A2026-01-01&createdAt=to%3A2026-12-31");
+    assert.ok(f.last().url.endsWith("?createdAt=from%3A2026-01-01&createdAt=to%3A2026-12-31"));
   });
 
   test("no content decodes to null", async () => {
     const { tracker } = client(new Response(null, { status: 204 }));
-    expect(await tracker.request("DELETE", "/issues/TEST-1/comments/1")).toBeNull();
+    assert.equal(await tracker.request("DELETE", "/issues/TEST-1/comments/1"), null);
   });
 
   test("a non-json body falls back to text", async () => {
     const { tracker } = client(new Response("plain"));
-    expect(await tracker.request("GET", "/whatever")).toBe("plain");
+    assert.equal(await tracker.request("GET", "/whatever"), "plain");
   });
 
   test("an If-Match header rides along", async () => {
     const { tracker, f } = client();
     await tracker.request("PATCH", "/boards/1", { headers: { "If-Match": '"7"' } });
-    expect(f.last().headers["If-Match"]).toBe('"7"');
+    assert.equal(f.last().headers["If-Match"], '"7"');
   });
 });
 
@@ -165,29 +166,29 @@ describe("errors", () => {
     const error = (await tracker
       .request("GET", "/issues/NOPE-1")
       .catch((e: unknown) => e)) as TrackerApiError;
-    expect(error).toBeInstanceOf(TrackerApiError);
-    expect(error.status).toBe(404);
-    expect(error.message).toContain("Issue not found");
-    expect(error.payload).toEqual(body);
+    assert.ok(error instanceof TrackerApiError);
+    assert.equal(error.status, 404);
+    assert.ok(error.message.includes("Issue not found"));
+    assert.deepEqual(error.payload, body);
   });
 
   test("an errors map becomes the message", async () => {
     const { tracker } = client(
       Response.json({ errors: { summary: "must not be empty" } }, { status: 422 }),
     );
-    await expect(tracker.request("POST", "/issues/")).rejects.toThrow("summary: must not be empty");
+    await assert.rejects(tracker.request("POST", "/issues/"), /summary: must not be empty/);
   });
 
   test("an unknown error shape falls back to the raw body", async () => {
     // The error body shape is not documented, so an unexpected one must still
     // reach the caller instead of being swallowed.
     const { tracker } = client(new Response("gateway exploded", { status: 400 }));
-    await expect(tracker.request("GET", "/issues/TEST-1")).rejects.toThrow("gateway exploded");
+    await assert.rejects(tracker.request("GET", "/issues/TEST-1"), /gateway exploded/);
   });
 
   test("an empty error body falls back to the status text", async () => {
     const { tracker } = client(new Response("", { status: 403, statusText: "Forbidden" }));
-    await expect(tracker.request("GET", "/issues/TEST-1")).rejects.toThrow("Forbidden");
+    await assert.rejects(tracker.request("GET", "/issues/TEST-1"), /Forbidden/);
   });
 
   test("a transport failure becomes a status-zero api error", async () => {
@@ -197,9 +198,9 @@ describe("errors", () => {
     const error = (await tracker
       .request("POST", "/issues/")
       .catch((e: unknown) => e)) as TrackerApiError;
-    expect(error).toBeInstanceOf(TrackerApiError);
-    expect(error.status).toBe(0);
-    expect(error.message).toContain("Failed to reach Yandex Tracker");
+    assert.ok(error instanceof TrackerApiError);
+    assert.equal(error.status, 0);
+    assert.ok(error.message.includes("Failed to reach Yandex Tracker"));
   });
 });
 
@@ -212,24 +213,24 @@ describe("download", () => {
       dir,
       "report.txt",
     );
-    expect(result).toEqual({ path: join(dir, "report.txt"), name: "report.txt", size: 5 });
-    expect(await readFile(result.path, "utf8")).toBe("abcde");
-    expect(f.last().url).toEndWith("/v3/issues/TEST-1/attachments/7/report.txt");
+    assert.deepEqual(result, { path: join(dir, "report.txt"), name: "report.txt", size: 5 });
+    assert.equal(await readFile(result.path, "utf8"), "abcde");
+    assert.ok(f.last().url.endsWith("/v3/issues/TEST-1/attachments/7/report.txt"));
   });
 
   test("a traversing file name cannot escape the destination", async () => {
     const { tracker } = client(new Response("x"));
     const dir = await mkdtemp(join(tmpdir(), "tracker-"));
     const result = await tracker.download("/issues/TEST-1/attachments/7/evil", dir, "../evil.txt");
-    expect(dirname(result.path)).toBe(dir);
-    expect(result.name).toBe("evil.txt");
+    assert.equal(dirname(result.path), dir);
+    assert.equal(result.name, "evil.txt");
   });
 
   test("creates the destination directory", async () => {
     const { tracker } = client(new Response("x"));
     const dir = join(await mkdtemp(join(tmpdir(), "tracker-")), "a", "b");
     const result = await tracker.download("/issues/TEST-1/attachments/7/f.txt", dir, "f.txt");
-    expect(await readFile(result.path, "utf8")).toBe("x");
+    assert.equal(await readFile(result.path, "utf8"), "x");
   });
 });
 
@@ -243,21 +244,33 @@ describe("upload", () => {
     await tracker.upload("/issues/TEST-1/attachments/", filePath, {
       params: { filename: "renamed.txt" },
     });
-    expect(f.last().url).toEndWith("/v3/issues/TEST-1/attachments/?filename=renamed.txt");
+    assert.ok(f.last().url.endsWith("/v3/issues/TEST-1/attachments/?filename=renamed.txt"));
     const form = f.last().body as FormData;
-    expect(form).toBeInstanceOf(FormData);
+    assert.ok(form instanceof FormData);
     const part = form.get("file") as File;
-    expect(part.name).toBe("notes.txt");
-    expect(await part.text()).toBe("hello");
+    assert.equal(part.name, "notes.txt");
+    assert.equal(await part.text(), "hello");
     // fetch owns the multipart boundary, so we must not set Content-Type.
-    expect(f.last().headers["Content-Type"]).toBeUndefined();
+    assert.equal(f.last().headers["Content-Type"], undefined);
+  });
+
+  test("the import endpoints name the part file_data", async () => {
+    // post-attachment.md calls the part `file`; import-attachments.md calls it
+    // `file_data`. The caller says which, and nothing else differs.
+    const { tracker, f } = client(Response.json({ id: "7" }));
+    const dir = await mkdtemp(join(tmpdir(), "tracker-"));
+    const filePath = join(dir, "notes.txt");
+    await writeFile(filePath, "hello");
+
+    await tracker.upload("/issues/TEST-1/attachments/_import", filePath, { part: "file_data" });
+    const form = f.last().body as FormData;
+    assert.equal(form.get("file"), null);
+    assert.equal((form.get("file_data") as File).name, "notes.txt");
   });
 
   test("a missing file is an argument error, not a transport error", async () => {
     const { tracker, f } = client();
-    await expect(tracker.upload("/issues/TEST-1/attachments/", "/no/such/file")).rejects.toThrow(
-      TypeError,
-    );
-    expect(f.calls).toHaveLength(0);
+    await assert.rejects(tracker.upload("/issues/TEST-1/attachments/", "/no/such/file"), TypeError);
+    assert.equal(f.calls.length, 0);
   });
 });

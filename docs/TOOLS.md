@@ -18,13 +18,13 @@ The **Effect** column is what the tool tells your host about the call, as MCP
 annotations: `read` (`readOnlyHint`) changes nothing and can be granted a
 standing permission, `create` only adds, and `modify` (`destructiveHint`) edits
 or deletes something that already exists and should be confirmed. It follows the
-HTTP method except where the method misleads — the five `_search` / `_count`
+HTTP method except where the method misleads — the six `_search` / `_count`
 endpoints are POSTs that read, the two attachment downloads are GETs that write
-a file to your disk, and POSTs like `tracker_move_issue` or `tracker_start_sprint`
-act on an object that is already there.
+a file to your disk, and POSTs like `tracker_move_issue`, `tracker_start_sprint`
+or the three `tracker_bulk_*` operations act on objects that are already there.
 
 > Everything under [The tools](#the-tools) is generated from the tool registry:
-> `bun run docs:tools` rewrites it. Edit the tools, not the tables. This section
+> `npm run docs:tools` rewrites it. Edit the tools, not the tables. This section
 > and the two below it are hand-written.
 
 ## Calling convention
@@ -56,17 +56,18 @@ An argument you leave out is absent from the request; it is never sent as `null`
 
 ## Where the wrapper is not literal
 
-Six places where a tool cannot be a byte-for-byte mirror of its endpoint. There
-are no others.
+Seven places where a tool cannot be a byte-for-byte mirror of its endpoint.
+There are no others.
 
-| What                                                                                              | Why                                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `destDir` / `saveAs` on `tracker_get_attachment`, `tracker_get_attachment_preview`                | Those endpoints return a file. An MCP result is text, so the tool streams the bytes to a local directory and returns `{"path", "name", "size"}`.                                                                                          |
-| `filePath` on `tracker_post_attachment`, `tracker_post_temp_attachment`                           | Those endpoints take `multipart/form-data`. The tool reads the local path and sends it as the documented `file` part.                                                                                                                     |
-| `version` on the board, column and sprint edits                                                   | Those pages document it as the `If-Match: "<version>"` header rather than a parameter. Elsewhere (`tracker_patch_issue`, the workflow / trigger / component / dictionary edits) `version` is a real query parameter and is passed as one. |
-| `page` on `tracker_search_issues`, `tracker_get_users`, `tracker_get_queues`                      | Those pages describe the result as paginated and link to [common-format](https://yandex.ru/support/tracker/en/api/common-format.md) instead of repeating the parameters. `perPage` + `page` come from there.                              |
-| The nine `relationship` values in `tracker_link_issue`'s description                              | No endpoint in the API lists link types, so the values enumerated on [link-issue](https://yandex.ru/support/tracker/en/api/issues/link-issue.md) are the only place to learn them.                                                        |
-| `commentId` on `tracker_entity_patch_comment`; the per-item body of `tracker_edit_checklist_item` | Those two pages contradict themselves (summary vs resource table, example vs parameter table). Both tools follow the page's parameter table, which matches the path — and that is what the endpoint accepts in practice.                  |
+| What                                                                                                                                      | Why                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `destDir` / `saveAs` on `tracker_get_attachment`, `tracker_get_attachment_preview`                                                        | Those endpoints return a file. An MCP result is text, so the tool streams the bytes to a local directory and returns `{"path", "name", "size"}`.                                                                                          |
+| `filePath` on `tracker_post_attachment`, `tracker_post_temp_attachment`, `tracker_import_attachment`, `tracker_import_comment_attachment` | Those endpoints take `multipart/form-data`. The tool reads the local path and sends it as the documented part — `file` on the attachment endpoints, `file_data` on the import ones.                                                       |
+| `version` on the board, column and sprint edits                                                                                           | Those pages document it as the `If-Match: "<version>"` header rather than a parameter. Elsewhere (`tracker_patch_issue`, the workflow / trigger / component / dictionary edits) `version` is a real query parameter and is passed as one. |
+| `page` on `tracker_search_issues`, `tracker_get_users`, `tracker_get_queues`                                                              | Those pages describe the result as paginated and link to [common-format](https://yandex.ru/support/tracker/en/api/common-format.md) instead of repeating the parameters. `perPage` + `page` come from there.                              |
+| The nine `relationship` values in `tracker_link_issue`'s description                                                                      | No endpoint in the API lists link types, so the values enumerated on [link-issue](https://yandex.ru/support/tracker/en/api/issues/link-issue.md) are the only place to learn them.                                                        |
+| `commentId` on `tracker_entity_patch_comment`; the per-item body of `tracker_edit_checklist_item`                                         | Those two pages contradict themselves (summary vs resource table, example vs parameter table). Both tools follow the page's parameter table, which matches the path — and that is what the endpoint accepts in practice.                  |
+| `scrolls` on `tracker_clear_scroll`                                                                                                       | That endpoint's body is a bare `{"<scrollId>": "<scrollToken>"}` map with no named parameters, and an MCP argument list needs a name. `scrolls` is sent as the whole body, nothing wrapping it.                                           |
 
 Every other argument is spelled exactly as the API spells it, `from` included.
 
@@ -173,6 +174,53 @@ Queues, versions, tags, permissions, local fields, workflows, triggers, autoacti
 | `tracker_get_component_user_access`  | `GET /v3/components/{componentId}/permissions/users/{userId}`        | read   | [queues/get-component-user-access](https://yandex.ru/support/tracker/en/api/queues/get-component-user-access.md)             |
 | `tracker_get_component_group_access` | `GET /v3/components/{componentId}/permissions/groups/{groupId}`      | read   | [queues/get-component-group-access](https://yandex.ru/support/tracker/en/api/queues/get-component-group-access.md)           |
 
+### Bulk operations — 5 tools
+
+The same edit, move or transition applied to up to 10,000 issues, and the status of the operation.
+
+| Tool                             | Endpoint                                   | Effect | Documentation                                                                                              |
+| -------------------------------- | ------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------- |
+| `tracker_bulk_update_issues`     | `POST /v3/bulkchange/_update`              | modify | [bulkchange/bulk-update-issues](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-update-issues.md) |
+| `tracker_bulk_move_issues`       | `POST /v3/bulkchange/_move`                | modify | [bulkchange/bulk-move-issues](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-issues.md)     |
+| `tracker_bulk_transition_issues` | `POST /v3/bulkchange/_transition`          | modify | [bulkchange/bulk-transition](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-transition.md)       |
+| `tracker_get_bulkchange`         | `GET /v3/bulkchange/{bulkchangeId}`        | read   | [bulkchange/bulk-move-info](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md)         |
+| `tracker_get_bulkchange_issues`  | `GET /v3/bulkchange/{bulkchangeId}/issues` | read   | [bulkchange/bulk-move-info](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md)         |
+
+### Import — 6 tools
+
+Issues, comments, links, worklog records and files brought in from another tracker with their original authors and dates.
+
+| Tool                                | Endpoint                                                             | Effect | Documentation                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
+| `tracker_import_issue`              | `POST /v3/issues/_import`                                            | create | [import/import-ticket](https://yandex.ru/support/tracker/en/api/import/import-ticket.md)           |
+| `tracker_import_comment`            | `POST /v3/issues/{issueId}/comments/_import`                         | create | [import/import-comments](https://yandex.ru/support/tracker/en/api/import/import-comments.md)       |
+| `tracker_import_link`               | `POST /v3/issues/{issueId}/links/_import`                            | create | [import/import-links](https://yandex.ru/support/tracker/en/api/import/import-links.md)             |
+| `tracker_import_worklog`            | `POST /v3/issues/{issueId}/worklogs/_import`                         | create | [import/import-worklogs](https://yandex.ru/support/tracker/en/api/import/import-worklogs.md)       |
+| `tracker_import_attachment`         | `POST /v3/issues/{issueId}/attachments/_import`                      | create | [import/import-attachments](https://yandex.ru/support/tracker/en/api/import/import-attachments.md) |
+| `tracker_import_comment_attachment` | `POST /v3/issues/{issueId}/comments/{commentId}/attachments/_import` | create | [import/import-attachments](https://yandex.ru/support/tracker/en/api/import/import-attachments.md) |
+
+### Saved filters — 3 tools
+
+The issue filters saved in the Tracker interface.
+
+| Tool                    | Endpoint                       | Effect | Documentation                                                                              |
+| ----------------------- | ------------------------------ | ------ | ------------------------------------------------------------------------------------------ |
+| `tracker_get_filter`    | `GET /v3/filters/{filterId}`   | read   | [filters/get-filter](https://yandex.ru/support/tracker/en/api/filters/get-filter.md)       |
+| `tracker_create_filter` | `POST /v3/filters/`            | create | [filters/create-filter](https://yandex.ru/support/tracker/en/api/filters/create-filter.md) |
+| `tracker_update_filter` | `PATCH /v3/filters/{filterId}` | modify | [filters/update-filter](https://yandex.ru/support/tracker/en/api/filters/update-filter.md) |
+
+### Queue macros — 5 tools
+
+The macros a queue offers when working on an issue.
+
+| Tool                   | Endpoint                                       | Effect | Documentation                                                              |
+| ---------------------- | ---------------------------------------------- | ------ | -------------------------------------------------------------------------- |
+| `tracker_get_macros`   | `GET /v3/queues/{queueId}/macros`              | read   | [get-macroses](https://yandex.ru/support/tracker/en/api/get-macroses.md)   |
+| `tracker_get_macro`    | `GET /v3/queues/{queueId}/macros/{macroId}`    | read   | [get-macros](https://yandex.ru/support/tracker/en/api/get-macros.md)       |
+| `tracker_create_macro` | `POST /v3/queues/{queueId}/macros`             | create | [post-macros](https://yandex.ru/support/tracker/en/api/post-macros.md)     |
+| `tracker_patch_macro`  | `PATCH /v3/queues/{queueId}/macros/{macroId}`  | modify | [patch-macros](https://yandex.ru/support/tracker/en/api/patch-macros.md)   |
+| `tracker_delete_macro` | `DELETE /v3/queues/{queueId}/macros/{macroId}` | modify | [delete-macros](https://yandex.ru/support/tracker/en/api/delete-macros.md) |
+
 ### Boards & sprints — 18 tools
 
 Boards, their columns, and sprints.
@@ -234,6 +282,38 @@ The `entities` API, with their comments, checklists, attachments, links and perm
 | `tracker_entity_get_extended_permissions`   | `GET /v3/entities/{entityType}/{entityId}/extendedPermissions`                     | read   | [entities/get-access](https://yandex.ru/support/tracker/en/api/entities/get-access.md)                                             |
 | `tracker_entity_patch_permissions`          | `PATCH /v3/entities/{entityType}/{entityId}/permissions`                           | modify | [entities/patch-access](https://yandex.ru/support/tracker/en/api/entities/patch-access.md)                                         |
 | `tracker_entity_patch_extended_permissions` | `PATCH /v3/entities/{entityType}/{entityId}/extendedPermissions`                   | modify | [entities/patch-access](https://yandex.ru/support/tracker/en/api/entities/patch-access.md)                                         |
+
+### Projects (older API) — 6 tools
+
+The projects API that predates `entities`; every page recommends its entity counterpart.
+
+| Tool                         | Endpoint                              | Effect | Documentation                                                                                          |
+| ---------------------------- | ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `tracker_get_projects`       | `GET /v3/projects`                    | read   | [projects/get-projects](https://yandex.ru/support/tracker/en/api/projects/get-projects.md)             |
+| `tracker_get_project`        | `GET /v3/projects/{projectId}`        | read   | [projects/get-project](https://yandex.ru/support/tracker/en/api/projects/get-project.md)               |
+| `tracker_get_project_queues` | `GET /v3/projects/{projectId}/queues` | read   | [projects/get-project-queues](https://yandex.ru/support/tracker/en/api/projects/get-project-queues.md) |
+| `tracker_create_project`     | `POST /v3/projects/`                  | create | [projects/create-project](https://yandex.ru/support/tracker/en/api/projects/create-project.md)         |
+| `tracker_update_project`     | `PUT /v3/projects/{projectId}`        | modify | [projects/update-project](https://yandex.ru/support/tracker/en/api/projects/update-project.md)         |
+| `tracker_delete_project`     | `DELETE /v3/projects/{projectId}`     | modify | [projects/delete-project](https://yandex.ru/support/tracker/en/api/projects/delete-project.md)         |
+
+### Dashboards — 2 tools
+
+Dashboards and the Cycle time widget.
+
+| Tool                               | Endpoint                                              | Effect | Documentation                                                                                          |
+| ---------------------------------- | ----------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `tracker_create_dashboard`         | `POST /v3/dashboards/`                                | create | [dashboards/create-dashboard](https://yandex.ru/support/tracker/en/api/dashboards/create-dashboard.md) |
+| `tracker_create_cycle_time_widget` | `POST /v3/dashboards/{dashboardId}/widgets/cycleTime` | create | [dashboards/create-widget](https://yandex.ru/support/tracker/en/api/dashboards/create-widget.md)       |
+
+### Absences — 3 tools
+
+Employee absences: vacations, sick leaves and duty shifts.
+
+| Tool                  | Endpoint                | Effect | Documentation                                                                    |
+| --------------------- | ----------------------- | ------ | -------------------------------------------------------------------------------- |
+| `tracker_create_gaps` | `POST /v3/gaps`         | create | [gaps/post-gaps](https://yandex.ru/support/tracker/en/api/gaps/post-gaps.md)     |
+| `tracker_search_gaps` | `POST /v3/gaps/_search` | read   | [gaps/search-gaps](https://yandex.ru/support/tracker/en/api/gaps/search-gaps.md) |
+| `tracker_delete_gaps` | `DELETE /v3/gaps`       | modify | [gaps/delete-gaps](https://yandex.ru/support/tracker/en/api/gaps/delete-gaps.md) |
 
 ### Reference dictionaries — 12 tools
 

@@ -683,17 +683,20 @@ https://yandex.ru/support/tracker/en/api/issues/get-suggest.md`,
     description: `Release the resources of a scrollable issue search snapshot.
 
 POST /v3/system/search/scroll/_clear
-https://yandex.ru/support/tracker/en/api/issues/search-release.md`,
+https://yandex.ru/support/tracker/en/api/issues/search-release.md
+
+The body of this endpoint is a bare map rather than named parameters, so
+\`scrolls\` is a wrapper this tool adds and sends as the whole body.`,
     effect: "modify",
     input: {
-      fields: z
+      scrolls: z
         .record(z.string(), z.unknown())
         .describe(
-          "One `<scrollId>: <scrollToken>` pair per result page, taken from the `X-Scroll-Id` and `X-Scroll-Token` headers of the scrollable search responses.",
+          "One `<scrollId>: <scrollToken>` pair per result page, taken from the `X-Scroll-Id` and `X-Scroll-Token` headers of the scrollable search responses. Sent as the request body itself.",
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", "/system/search/scroll/_clear", { body: a.fields }),
+      tracker.request("POST", "/system/search/scroll/_clear", { body: a.scrolls }),
   }),
 
   tool({

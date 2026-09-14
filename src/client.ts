@@ -26,7 +26,7 @@ const RETRY_METHODS = new Set(["GET", "HEAD", "OPTIONS", "DELETE"]);
 const RETRY_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 500;
 
-export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A query value, or a list of them when the API expects a repeated key. */
 export type QueryValue = string | number | boolean | Array<string | number | boolean>;
@@ -144,6 +144,12 @@ export type RequestInit_ = {
   params?: Record<string, unknown>;
   body?: unknown;
   headers?: Record<string, string>;
+  /**
+   * Name of the multipart part on an upload. `file` on the attachment
+   * endpoints, `file_data` on the import ones — the pages differ, so the
+   * caller says which.
+   */
+  part?: string;
 };
 
 type FetchLike = typeof fetch;
@@ -168,7 +174,7 @@ export class Tracker {
     return decode(response);
   }
 
-  /** POST a local file as multipart/form-data (the part is named `file`). */
+  /** POST a local file as multipart/form-data under the documented part name. */
   async upload(path: string, filePath: string, init: RequestInit_ = {}): Promise<unknown> {
     // Validate up front so a missing or unreadable path is a clean argument
     // error rather than being mislabeled as a transport failure.
@@ -180,9 +186,10 @@ export class Tracker {
     }
 
     const form = new FormData();
-    // post-attachment.md / temp-attachment.md: the multipart part is named `file`.
+    // post-attachment.md / temp-attachment.md name the part `file`;
+    // import-attachments.md names it `file_data`.
     // Content-Type is deliberately left alone — fetch sets the boundary.
-    form.append("file", new File([bytes], basename(filePath)));
+    form.append(init.part ?? "file", new File([bytes], basename(filePath)));
     const response = await this.#send("POST", this.#url(path, init.params), { body: form });
     return decode(response);
   }

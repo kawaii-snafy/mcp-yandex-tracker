@@ -51,7 +51,7 @@ YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
-To run from a clone instead of the published package, build it (`bun run build`)
+To run from a clone instead of the published package, build it (`npm run build`)
 and set `command = "node"`, `args = ["/path/to/mcp-yandex-tracker/dist/cli.js"]`.
 
 Restart Codex after editing the config.
@@ -72,11 +72,11 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 ### Any MCP host
 
 Point the host at the published package — `npx -y mcp-yandex-tracker` — or, from
-a clone, at `node dist/cli.js` after `bun run build`.
+a clone, at `node dist/cli.js` after `npm run build`.
 
 The published artifact is a single Node-compatible bundle with a
-`#!/usr/bin/env node` shebang, so **Bun is not required to run it**; Node 20 or
-newer is. `bunx mcp-yandex-tracker` works too.
+`#!/usr/bin/env node` shebang and its dependencies inlined, so a host needs
+nothing but Node 20 or newer — there is no dependency tree to install first.
 
 ## Resources (@-mentions)
 
