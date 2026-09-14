@@ -33,12 +33,17 @@ Smoke-test without a host — MCP requires the `initialize` handshake before any
 other request, so send it (and the `initialized` notification) first:
 
 ```sh
-printf '%s\n' \
+{ printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-| YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." .venv/bin/mcp-yandex-tracker
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  sleep 5
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." .venv/bin/mcp-yandex-tracker
 ```
+
+The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
+the server shuts down on EOF, often before it has answered `tools/list` — you
+then get only the `initialize` reply.
 
 ## Environment
 
