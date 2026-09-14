@@ -1095,11 +1095,13 @@ def tracker_delete_attachment(
 def resource(uri: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register a read-only Tracker resource.
 
-    The body's return value becomes a compact JSON resource. Note: MCPServer's
-    resource read path already wraps any handler error into a `ResourceError`
-    itself, so passing `ResourceError` to the shared `_json_safe` here is only
-    for parity with `tool` — the final error type comes from the SDK regardless.
-    The wrapper's real job for resources is the compact serialization.
+    The body's return value becomes a compact JSON resource, and a domain error
+    becomes a `ResourceError`. How much of that detail reaches the client is the
+    SDK's call and changed inside the 2.x range we allow: mcp 2.0 re-wrapped
+    every handler error into a generic "Error reading resource {uri}" (detail
+    only as `__cause__`), while 2.1+ re-raises a `ResourceError` untouched — so
+    on current mcp this mapping, not just the serialization, is what carries the
+    Tracker message across.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

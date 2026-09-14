@@ -117,11 +117,13 @@ org id.
 | Host reports the server "crashed" or garbled     | Something wrote non-JSON to stdout. Only JSON-RPC may go to stdout.          |
 | `isError: true`, "Install yandex_tracker_client…"| The runtime is missing the SDK dependency.                                   |
 | JSON-RPC `error` with code `-32601`/unsupported method | The host called a method the server does not implement (see [ARCHITECTURE.md](ARCHITECTURE.md)). |
-| `resources/read` (a `tracker://…` @-mention) fails with only `Error reading resource <uri>` | Expected on the resource path: mcp (≥2.0) wraps the underlying Tracker/config error into that generic message and does not send the detail to the client. Read the same data via a tool (e.g. `tracker_get_issue`) — the tool path surfaces the real cause in its `isError` message. |
+| `resources/read` (a `tracker://…` @-mention) fails with only `Error reading resource <uri>` | You are on mcp 2.0, which replaced the handler's message with that generic one. Upgrade to mcp ≥ 2.1, which passes the server's `ResourceError` through with the real Tracker/config detail — or read the same data via a tool (e.g. `tracker_get_issue`), whose `isError` message always carries the cause. |
 
 Errors from Tracker or from bad tool arguments come back **inside** a successful
 `tools/call` response with `isError: true` — they are not JSON-RPC errors. Only
 protocol-level problems (parse errors, malformed requests, unknown methods) use
-the JSON-RPC `error` channel. Resource reads differ: mcp's `read_resource` path
-replaces the handler's message with a generic `Error reading resource <uri>`, so
-the tools remain the authoritative surface for diagnosable errors.
+the JSON-RPC `error` channel. Resource reads differ: they fail as a
+`ResourceError` rather than an `isError` payload, and on mcp 2.0 that error's
+message was replaced with a generic `Error reading resource <uri>` (mcp 2.1+
+passes the real message through). The tools remain the surface with the most
+consistently diagnosable errors.

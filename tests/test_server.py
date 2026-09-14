@@ -361,11 +361,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fake.calls, [("list_statuses",)])
 
     async def test_resource_error_surfaces_message(self):
-        # The resource wrapper maps a domain error to ResourceError. mcp 2.0's
-        # own read_resource() then intentionally does not leak that message
-        # verbatim to the caller -- any non-MCPError exception, including our
-        # ResourceError, is re-wrapped into a generic "Error reading resource
-        # {uri}" message, with the original detail chained as __cause__.
+        # The resource wrapper maps a domain error to ResourceError. How much of
+        # that a caller sees is the SDK's call, and it varies across the mcp
+        # range we allow: 2.0 re-wrapped every handler error into a generic
+        # "Error reading resource {uri}" with the detail chained as __cause__,
+        # while 2.1+ re-raises our ResourceError untouched. Assert our own
+        # contract rather than either shape -- a ResourceError that still
+        # carries the Tracker detail, in the message or the cause chain.
         class Boom:
             def list_statuses(self):
                 raise TrackerApiError(500, "boom")
@@ -373,8 +375,10 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         _use_client(Boom())
         with self.assertRaises(ResourceError) as ctx:
             await server.mcp.read_resource("tracker://statuses")
-        self.assertIn("tracker://statuses", str(ctx.exception))
-        self.assertIn("boom", str(ctx.exception.__cause__))
+        reported = " ".join(
+            str(exc) for exc in (ctx.exception, ctx.exception.__cause__) if exc
+        )
+        self.assertIn("boom", reported)
 
     # --- Errors ------------------------------------------------------------
     async def test_missing_required_argument_is_tool_error(self):
