@@ -4,10 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file **stdio MCP server** that exposes Yandex Tracker to LLM agents. It
-is built on the official MCP Python SDK (`MCPServer`) and reaches Tracker through
-the official `yandex_tracker_client` SDK. There is no HTTP/SSE transport — one
-process serves one client over stdin/stdout.
+A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents.
+It is a deliberately thin wrapper: **one tool per documented endpoint**, the API's
+own parameter names on the way in, the API's own JSON on the way out. It is built
+on the official MCP Python SDK (`MCPServer`) and reaches Tracker with plain
+`requests` calls. There is no HTTP/SSE transport — one process serves one client
+over stdin/stdout.
+
+## The rule that governs every other decision
+
+**The official documentation is the only source of truth for Yandex Tracker.**
+
+- Index of every page: <https://yandex.ru/support/tracker/en/llms.txt>
+- Any page is markdown by appending `.md`:
+  `https://yandex.ru/support/tracker/en/api/<section>/<page>.md`
+
+Blogs, Stack Overflow, the `yandex_tracker_client` SDK this server used to wrap,
+observed production behavior, and model memory are **not** sources. A path,
+parameter or field that is not on a page from `llms.txt` does not go into the
+code. Before touching a tool, open its page — every tool's docstring links to it.
+If something is genuinely needed and genuinely undocumented, that is a deviation:
+record it in `docs/TOOLS.md` with the reason.
 
 ## Commands
 
@@ -19,12 +36,11 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e .
 .venv/bin/python -m unittest discover -s tests
 
 # Run a single test
-.venv/bin/python -m unittest tests.test_server.ServerTests.test_get_issue_returns_compact_text
+.venv/bin/python -m unittest tests.test_client.RequestTests.test_builds_a_v3_url_and_passes_the_timeout
 
-# Run the server (any of these; all call main() -> mcp.run("stdio"))
+# Run the server (either; both call main() -> mcp.run("stdio"))
 .venv/bin/mcp-yandex-tracker
 .venv/bin/python -m mcp_yandex_tracker
-.venv/bin/python mcp_yandex_tracker.py
 ```
 
 Always run the tests after changing behavior. There is no separate lint step.
@@ -50,32 +66,33 @@ then get only the `initialize` reply.
 `YANDEX_TRACKER_TOKEN` plus exactly one org id (`YANDEX_TRACKER_CLOUD_ORG_ID`
 for cloud orgs, or `YANDEX_TRACKER_ORG_ID`) are required; a missing one surfaces
 as a clean tool error, not a crash. Optional: `YANDEX_TRACKER_AUTH_SCHEME`
-(`OAuth` default, `Bearer` for IAM tokens), `YANDEX_TRACKER_BASE_URL`,
-`YANDEX_TRACKER_TIMEOUT`.
+(`OAuth` default, `Bearer` for IAM tokens), `YANDEX_TRACKER_BASE_URL` (host only
+— the client always appends `/v3`), `YANDEX_TRACKER_TIMEOUT`.
 
 ## Architecture
 
-Everything is one module, `mcp_yandex_tracker.py`, split into two
-clearly-commented sections. `MCPServer` owns the JSON-RPC framing, stdio
-transport, UTF-8, lifecycle, and `tools/list` / `tools/call` routing — none of
-that is hand-rolled here.
+```
+mcp_yandex_tracker/
+  client.py      # TrackerConfig, the errors, Tracker.request() — the whole Tracker side
+  server.py      # the MCPServer instance, the @tool / @resource wrappers, main()
+  resources.py   # the read-only tracker:// surface
+  tools/         # issues.py queues.py boards.py entities.py admin.py users.py
+```
 
-- **MCP server layer** — the `mcp = MCPServer(...)` instance and 36
-  `@tool`-decorated typed functions named `tracker_*`. MCPServer derives each
-  tool's input schema from the function's type hints and
-  `Annotated[..., Field(description=...)]` metadata, and its description from the
-  docstring. Each tool body just calls a `YandexTrackerClient` method and
-  returns the raw payload. A few `@mcp.resource("tracker://...")` functions sit
-  alongside the tools (issue snapshot + reference dictionaries) as a *user*-facing
-  `@`-mention surface — additive context, not a replacement for the tools the
-  agent calls autonomously.
-- **SDK client layer** — `YandexTrackerClient` wraps the Tracker SDK; every
-  method funnels through `_call_sdk` (maps SDK/transport exceptions to
-  `TrackerApiError`) and `_to_plain` (recursively serializes SDK objects to
-  JSON-safe values, stripping transport noise like `self`/`cloudUid`).
+`MCPServer` owns the JSON-RPC framing, stdio transport, UTF-8, lifecycle, and
+`tools/list` / `tools/call` routing — none of that is hand-rolled here. Tool
+modules mirror the sections of the documentation, so a doc page maps to exactly
+one code file.
 
-Two cross-cutting mechanisms to know before editing:
+Three cross-cutting mechanisms to know before editing:
 
+- **`Tracker.request(method, path, params=, json=, files=, headers=)`** is the
+  only way out. It builds `{base_url}/v3{path}`, sends it on the shared
+  `requests.Session`, maps a transport failure to `TrackerApiError(0, …)` and any
+  non-2xx to `TrackerApiError(status, message, payload)`, and returns the decoded
+  body **untouched**. `upload()` and `download()` are the two variants the wire
+  format forces. The error-body shape is undocumented, so message extraction is
+  best-effort with a fallback to the raw body.
 - **The `@tool` wrapper** (not `mcp.tool` directly). It serializes the handler's
   return value to a single compact-JSON `TextContent` via
   `structured_output=False` — this is deliberate: it keeps responses token-lean
@@ -83,35 +100,35 @@ Two cross-cutting mechanisms to know before editing:
   also maps `TrackerApiError` / `TrackerConfigError` / `ValueError` to a
   `ToolError`, which the SDK returns as an `isError: true` result (the JSON-RPC
   call still succeeds). Do not bypass it.
-- **Cached client singleton.** `get_client()` builds one `YandexTrackerClient`
-  lazily (via the swappable `_client_factory`) and reuses it for the process, so
-  the SDK's `requests.Session` connection pool is shared across calls. Tests
-  inject a fake by setting `server._client = None; server._client_factory =
-  lambda: fake` — there is no per-instance server object.
+- **Cached client singleton.** `get_client()` builds one `Tracker` lazily (via the
+  swappable `_client_factory`) and reuses it for the process, so the
+  `requests.Session` connection pool is shared across calls. Tests inject a fake
+  by setting `server._client = None; server._client_factory = lambda: fake`.
 
 ## Non-negotiable rules
 
-- **Official SDKs only.** All Tracker access goes through `yandex_tracker_client`
-  objects (`TrackerClient`, `client.issues[...]`, collections, comments,
-  transitions). Do **not** add `requests`/`urllib`/raw HTTP or ad-hoc REST
-  wrappers for Tracker behavior. Runtime deps stay at `mcp` +
-  `yandex_tracker_client`.
+- **Documentation first** — the rule above. No undocumented endpoints, no guessed
+  parameters, no knowledge carried over from the old SDK.
+- **One tool per endpoint, nothing in between.** No projections, no renaming, no
+  client-side pagination, no convenience tools that compose several calls. If a
+  response is too big, trim it with the API's own `fields` / `expand`.
+- **No second HTTP path.** All Tracker access goes through `Tracker.request()`.
+  Do not add an SDK or a wrapper layer on top of `requests`. Runtime deps stay at
+  `mcp` + `requests`.
 - **stdout is protocol-only.** MCPServer writes JSON-RPC to stdout and logs to
   stderr. Never `print()` to stdout — it corrupts the MCP stream.
-- **Keep `docs/TOOLS.md` in sync** with the `@tool` signatures when you change a
-  tool.
+- **Keep `docs/TOOLS.md` in sync** with the tools when you change one.
 
 ## Adding a tool
 
-Add a method to `YandexTrackerClient` (SDK work inside a `_call_sdk` closure,
-result wrapped in `_to_plain`), then a `@tool`-decorated typed function that
-calls it, then document it in `docs/TOOLS.md` and cover it in
-`tests/test_client.py` (SDK-level) and `tests/test_server.py`
-(`mcp.call_tool(...)` level). See `docs/EXTENDING.md` for the full pattern.
+Find the endpoint's page in `llms.txt`, read the `.md`, transcribe its parameters
+into a `@tool` function in the matching `tools/` module (docstring = summary,
+blank line, `<METHOD> /v3/<path>`, page URL), add the row to `docs/TOOLS.md`, and
+add a row to the routing table in `tests/test_server.py`. See `docs/EXTENDING.md`
+for the full pattern and the naming conventions.
 
 ## Further docs
 
 `docs/` has the deep guides: `ARCHITECTURE.md` (internals), `EXTENDING.md`
-(adding tools, scaling), `TOOLS.md` (per-tool argument reference), and
-`INTEGRATION.md` (connecting hosts). `AGENTS.md` mirrors the non-negotiable
-rules above.
+(adding tools, scaling), `TOOLS.md` (the tool index), and `INTEGRATION.md`
+(connecting hosts). `AGENTS.md` mirrors the non-negotiable rules above.

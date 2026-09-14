@@ -1,9 +1,15 @@
 # Yandex Tracker MCP
 
-Small stdio MCP server for Yandex Tracker. It exposes tools for reading,
-searching, creating, updating, commenting on, transitioning, and linking Tracker
-issues, plus read-only reference lookups (queues, users, statuses, types,
-priorities, fields, versions, components) and the active sprint of a board.
+A stdio MCP server that puts the whole [Yandex Tracker REST API
+v3](https://yandex.ru/support/tracker/en/llms.txt) in front of an LLM agent —
+issues, comments, checklists, attachments, worklog, links and transitions;
+queues, local fields, workflows, triggers and components; boards, columns and
+sprints; projects, portfolios and goals; users and the reference dictionaries.
+
+It is a thin wrapper on purpose: **one tool per documented endpoint**, the API's
+own parameter names on the way in, the API's own JSON on the way out. Every
+tool's description links to the documentation page it was written from, so the
+agent can always read the source of truth.
 
 ## Usage with Codex
 
@@ -99,7 +105,7 @@ to stderr).
 Deeper docs live in [`docs/`](docs/README.md):
 
 - [INTEGRATION.md](docs/INTEGRATION.md) — connect the server to a host.
-- [TOOLS.md](docs/TOOLS.md) — full tool reference with arguments.
+- [TOOLS.md](docs/TOOLS.md) — every tool, its endpoint, and its doc page.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the server works internally.
 - [EXTENDING.md](docs/EXTENDING.md) — add tools, rules, and scaling notes.
 

@@ -1,772 +1,261 @@
+import json
+import os
+import tempfile
 import unittest
 
-from mcp_yandex_tracker import (
-    TrackerApiError,
-    TrackerConfig,
-    TrackerConfigError,
-    YandexTrackerClient,
-    _tracker_client_kwargs,
-)
+import requests
 
+from mcp_yandex_tracker import Tracker, TrackerApiError, TrackerConfig, TrackerConfigError
+from mcp_yandex_tracker.client import given
 
-class FakeCollection:
-    def __init__(self, items=None, find_result=None, count_result=0):
-        self.items = items or {}
-        self.find_result = find_result
-        self.count_result = count_result
-        self.created = []
-        self.find_calls = []
 
-    def __getitem__(self, key):
-        return self.items[key]
+class FakeResponse:
+    """Stands in for requests.Response — only what the transport actually reads."""
 
-    def create(self, **kwargs):
-        self.created.append(kwargs)
-        return kwargs
+    def __init__(self, status_code=200, json_body=None, text=None, chunks=None, reason="OK"):
+        self.status_code = status_code
+        self.reason = reason
+        self._json_body = json_body
+        self._chunks = chunks or []
+        if text is not None:
+            self.text = text
+        elif json_body is not None:
+            self.text = json.dumps(json_body)
+        else:
+            self.text = ""
+        self.content = b"".join(self._chunks) if self._chunks else self.text.encode()
+        self.closed = False
 
-    def find(self, **kwargs):
-        self.find_calls.append(kwargs)
-        if kwargs.get("count_only"):
-            return self.count_result
-        if self.find_result is not None:
-            return self.find_result
-        return [{"key": "TEST-1"}]
+    def json(self):
+        if self._json_body is None:
+            raise ValueError("no json")
+        return self._json_body
 
+    def iter_content(self, chunk_size):
+        return iter(self._chunks)
 
-class FakeDictCollection:
-    def __init__(self, items):
-        self._items = list(items)
-        self.get_all_calls = []
+    def close(self):
+        self.closed = True
 
-    def get_all(self, **kwargs):
-        self.get_all_calls.append(kwargs)
-        return list(self._items)
 
-    def __getitem__(self, key):
-        for item in self._items:
-            if str(item.get("id")) == str(key) or str(item.get("login")) == str(key):
-                return item
-        raise KeyError(key)
+class FakeSession:
+    """Records every call and replays queued responses in order."""
 
+    def __init__(self, *responses):
+        self.headers = {}
+        self.calls = []
+        self._responses = list(responses) or [FakeResponse(json_body={})]
 
-class FakeConnection:
-    def __init__(self, tags=None):
-        self.deleted = []
-        self.gets = []
-        self._tags = list(tags if tags is not None else ["backend", "urgent"])
+    def request(self, method, url, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        if len(self._responses) > 1:
+            return self._responses.pop(0)
+        return self._responses[0]
 
-    def delete(self, path):
-        self.deleted.append(path)
-        return {"deleted": path}
+    @property
+    def last(self):
+        return self.calls[-1]
 
-    def get(self, path, params=None):
-        self.gets.append(path)
-        if path.endswith("/tags"):
-            return list(self._tags)
-        return None
 
+def _config(**overrides):
+    values = {"token": "tkn", "org_id": "42"}
+    values.update(overrides)
+    return TrackerConfig(**values)
 
-class FakeLink:
-    def __init__(self, link_id, obj):
-        self.id = link_id
-        self.object = obj
-        self._path = f"/v2/issues/links/{link_id}"
 
-    def as_dict(self):
-        return {"id": self.id, "object": self.object}
+def _client(*responses, config=None):
+    session = FakeSession(*responses)
+    return Tracker(config=config or _config(), session=session), session
 
 
-class FakeLinks:
-    def __init__(self, links=None):
-        self.links = list(links or [])
-        self.created = []
-
-    def __iter__(self):
-        return iter(self.links)
-
-    def create(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": "new", **kwargs}
-
-
-class FakeCreatableList:
-    """Iterable collection that also records create() calls (worklog, checklist)."""
-
-    def __init__(self, items=None):
-        self.items = list(items or [])
-        self.created = []
-
-    def __iter__(self):
-        return iter(self.items)
-
-    def create(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": "new", **kwargs}
-
-
-class FakeAttachment:
-    def __init__(self, attachment_id, name, size=12, chunks=None):
-        self.id = attachment_id
-        self.name = name
-        self.size = size
-        self.content = f"/v2/issues/TEST-1/attachments/{attachment_id}/{name}"
-        self.chunks = chunks or [b"chunk1", b"chunk2"]
-        self.deleted_calls = 0
-
-    def delete(self):
-        self.deleted_calls += 1
-
-    def as_dict(self):
-        return {"id": self.id, "name": self.name, "size": self.size}
-
-
-class FakeAttachments:
-    def __init__(self, items=None):
-        self._items = list(items or [FakeAttachment("att1", "a.txt")])
-        self.created = []
-
-    def __iter__(self):
-        return iter(self._items)
-
-    def __getitem__(self, key):
-        for attachment in self._items:
-            if str(attachment.id) == str(key):
-                return attachment
-        raise KeyError(key)
-
-    def read(self, attachment):
-        return iter(attachment.chunks)
-
-    def create(self, file, params=None):
-        self.created.append({"file": file, "params": params})
-        return {"id": "att-new", "name": (params or {}).get("filename") or file}
-
-
-class FakeQueue:
-    def __init__(self, key, versions=None, components=None, local_fields=None):
-        self.key = key
-        self.versions = list(versions or [])
-        self.components = list(components or [])
-        self.local_fields = list(local_fields or [])
-        self._path = f"/v2/queues/{key}"
-
-    def as_dict(self):
-        return {"key": self.key}
-
-
-class FakeQueues:
-    def __init__(self, queues):
-        self._queues = {queue.key: queue for queue in queues}
-
-    def __getitem__(self, key):
-        return self._queues[key]
-
-    def get_all(self):
-        return list(self._queues.values())
-
-
-class FakeBoard:
-    def __init__(self, board_id, sprints=None):
-        self.id = board_id
-        self.sprints = list(sprints or [])
-
-
-class FakeBoards:
-    def __init__(self, boards):
-        self._boards = {str(board.id): board for board in boards}
-
-    def __getitem__(self, key):
-        return self._boards[str(key)]
-
-
-class FakeSeekablePaginatedList:
-    def __iter__(self):
-        return iter([FakeIssue("TEST-1")])
-
-    def __str__(self):
-        return "<SeekablePaginatedList>"
-
-
-class FakeTransition:
-    def __init__(self, transition_id, display, to):
-        self.id = transition_id
-        self.display = display
-        self.to = to
-        self.executions = []
-
-    def execute(self, **kwargs):
-        self.executions.append(kwargs)
-        return [{"id": "next", "to": {"key": "closed"}}]
-
-    def as_dict(self):
-        return {"id": self.id, "display": self.display, "to": self.to}
-
-
-class FakeTransitionCollection:
-    def __init__(self, transitions):
-        self.transitions = {transition.id: transition for transition in transitions}
-
-    def __getitem__(self, key):
-        return self.transitions[key]
-
-    def get_all(self):
-        return list(self.transitions.values())
-
-
-class FakeComment:
-    def __init__(self, comment_id, collection):
-        self.id = comment_id
-        self._collection = collection
-
-    def delete(self):
-        self._collection.deleted.append(self.id)
-
-
-class FakeComments:
-    def __init__(self):
-        self.created = []
-        self.deleted = []
-
-    def __getitem__(self, key):
-        return FakeComment(str(key), self)
-
-    def create(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": 1, **kwargs}
-
-    def get_all(self):
-        return [{"id": 1, "text": "hello"}]
-
-
-class FakeChangelog:
-    def __init__(self, items=None):
-        self._items = list(items or [{"id": "cl1"}])
-        self.get_all_calls = []
-
-    def get_all(self, **kwargs):
-        self.get_all_calls.append(kwargs)
-        return list(self._items)
-
-
-class FakeIssue:
-    def __init__(self, key, transitions=None, links=None):
-        self.key = key
-        self.comments = FakeComments()
-        self.transitions = FakeTransitionCollection(transitions or [])
-        self.links = FakeLinks(links)
-        self.changelog = FakeChangelog()
-        self.worklog = FakeCreatableList([{"id": "wl1"}])
-        self.checklist_items = FakeCreatableList([{"id": "ci1"}])
-        self.attachments = FakeAttachments()
-        self.updated = []
-
-    def update(self, **kwargs):
-        self.updated.append(kwargs)
-        return {"key": self.key, **kwargs}
-
-    def as_dict(self):
-        return {"key": self.key}
-
-
-class FakeSdkClient:
-    def __init__(self, issue, find_result=None, queues=None, boards=None):
-        self.issue = issue
-        self.issues = FakeCollection({issue.key: issue}, find_result=find_result)
-        self._connection = FakeConnection()
-        self.myself = {"self": "https://tracker/me", "login": "me", "uid": 42}
-        self.users = FakeDictCollection([{"id": "user1"}])
-        self.statuses = FakeDictCollection([{"key": "open"}])
-        self.issue_types = FakeDictCollection([{"key": "bug"}])
-        self.priorities = FakeDictCollection([{"key": "normal"}])
-        self.fields = FakeDictCollection([{"id": "summary"}])
-        self.linktypes = FakeDictCollection([{"id": "relates"}])
-        self.queues = FakeQueues(
-            queues
-            or [FakeQueue("TEST", versions=[{"id": "v1"}], components=[{"id": "c1"}])]
-        )
-        self.boards = FakeBoards(boards or [])
-
-
-class ClientTests(unittest.TestCase):
-    def test_env_config_requires_token_and_org(self):
+class ConfigTests(unittest.TestCase):
+    def test_requires_token_and_one_org_id(self):
         with self.assertRaises(TrackerConfigError):
             TrackerConfig.from_env({})
         with self.assertRaises(TrackerConfigError):
-            TrackerConfig.from_env({"YANDEX_TRACKER_TOKEN": "secret"})
+            TrackerConfig.from_env({"YANDEX_TRACKER_TOKEN": "tkn"})
 
-    def test_env_config_accepts_tracker_env(self):
+    def test_reads_every_supported_variable(self):
         config = TrackerConfig.from_env(
             {
-                "YANDEX_TRACKER_TOKEN": "secret",
-                "YANDEX_TRACKER_CLOUD_ORG_ID": "cloud",
-                "YANDEX_TRACKER_BASE_URL": "https://tracker.test/v2/",
+                "YANDEX_TRACKER_TOKEN": "tkn",
+                "YANDEX_TRACKER_CLOUD_ORG_ID": "cloud-1",
                 "YANDEX_TRACKER_AUTH_SCHEME": "Bearer",
-                "YANDEX_TRACKER_TIMEOUT": "12.5",
+                "YANDEX_TRACKER_BASE_URL": "https://tracker.example/",
+                "YANDEX_TRACKER_TIMEOUT": "5",
             }
         )
-
-        self.assertEqual(config.token, "secret")
-        self.assertEqual(config.cloud_org_id, "cloud")
-        self.assertEqual(config.base_url, "https://tracker.test/v2")
+        self.assertEqual(config.token, "tkn")
+        self.assertEqual(config.cloud_org_id, "cloud-1")
         self.assertEqual(config.auth_scheme, "Bearer")
-        self.assertEqual(config.timeout, 12.5)
-
-    def test_tracker_client_kwargs_preserve_auth_and_base_url(self):
-        config = TrackerConfig(
-            token="secret",
-            cloud_org_id="cloud",
-            base_url="https://tracker.test/v2",
-            auth_scheme="Bearer",
-            timeout=12.5,
-        )
-
-        self.assertEqual(
-            _tracker_client_kwargs(config),
-            {
-                "iam_token": "secret",
-                "cloud_org_id": "cloud",
-                "base_url": "https://tracker.test",
-                "api_version": "v2",
-                "timeout": 12.5,
-            },
-        )
-
-    def test_get_issue_reads_from_official_sdk_collection(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.get_issue("TEST-1"), {"key": "TEST-1"})
-
-    def test_search_issues_uses_official_sdk_find(self):
-        issue = FakeIssue("TEST-1")
-        sdk_client = FakeSdkClient(issue)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.search_issues(query="Queue: TEST", filter={"status": "open"}, per_page=5, page=2)
-
-        self.assertEqual(result, [{"key": "TEST-1"}])
-        self.assertEqual(
-            sdk_client.issues.find_calls,
-            [
-                {
-                    "query": "Queue: TEST",
-                    "filter": {"status": "open"},
-                    "order": None,
-                    "keys": None,
-                    "per_page": 5,
-                    "page": 2,
-                }
-            ],
-        )
-
-    def test_search_issues_materializes_sdk_paginated_list(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(
-            tracker_client=FakeSdkClient(issue, find_result=FakeSeekablePaginatedList())
-        )
-
-        result = client.search_issues(per_page=1)
-
-        self.assertEqual(result, [{"key": "TEST-1"}])
-
-    def test_update_issue_uses_official_sdk_issue_update(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.update_issue("TEST-1", {"summary": "new"}), {"key": "TEST-1", "summary": "new"})
-        self.assertEqual(issue.updated, [{"summary": "new"}])
-
-    def test_comments_use_official_sdk_issue_comments(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.add_comment("TEST-1", "hello"), {"id": 1, "text": "hello"})
-        self.assertEqual(client.list_comments("TEST-1"), [{"id": 1, "text": "hello"}])
-        self.assertEqual(issue.comments.created, [{"text": "hello"}])
-
-    def test_move_issue_status_executes_matching_transition(self):
-        start = FakeTransition(
-            "start_progress",
-            "Start progress",
-            {"key": "inProgress", "display": "In progress"},
-        )
-        issue = FakeIssue("TEST-1", [FakeTransition("close", "Close", {"key": "closed"}), start])
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        result = client.move_issue_status(
-            "TEST-1",
-            "In progress",
-            fields={"comment": "starting"},
-        )
-
-        self.assertEqual(result, [{"id": "next", "to": {"key": "closed"}}])
-        self.assertEqual(start.executions, [{"comment": "starting"}])
-
-    def test_execute_transition_uses_official_sdk_transition(self):
-        close = FakeTransition("close", "Close", {"key": "closed"})
-        issue = FakeIssue("TEST-1", [close])
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        client.execute_transition("TEST-1", "close", {"resolution": "fixed"})
-
-        self.assertEqual(close.executions, [{"resolution": "fixed"}])
-
-    def test_search_issues_include_total_adds_count(self):
-        issue = FakeIssue("TEST-1")
-        sdk_client = FakeSdkClient(issue)
-        sdk_client.issues.count_result = 7
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.search_issues(query="Queue: TEST", per_page=5, page=2, include_total=True)
-
-        self.assertEqual(
-            result,
-            {"issues": [{"key": "TEST-1"}], "total": 7, "page": 2, "per_page": 5},
-        )
-        self.assertTrue(any(call.get("count_only") for call in sdk_client.issues.find_calls))
-
-    def test_search_issues_caps_results_at_per_page(self):
-        issue = FakeIssue("TEST-1")
-        many = [{"key": f"TEST-{n}"} for n in range(10)]
-        sdk_client = FakeSdkClient(issue, find_result=many)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.search_issues(per_page=3)
-
-        # per_page is a hard cap even though find() yields 10 issues.
-        self.assertEqual(result, [{"key": "TEST-0"}, {"key": "TEST-1"}, {"key": "TEST-2"}])
-
-    def test_search_issues_stops_iterating_after_per_page(self):
-        issue = FakeIssue("TEST-1")
-        consumed = []
-
-        def counting_pages():
-            for n in range(10):
-                consumed.append(n)
-                yield {"key": f"TEST-{n}"}
-
-        sdk_client = FakeSdkClient(issue, find_result=counting_pages())
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        client.search_issues(per_page=2)
-
-        # Iteration halts at the cap, so later (paginated) items are never pulled.
-        self.assertEqual(consumed, [0, 1])
-
-    def test_search_issues_returns_compact_projection_by_default(self):
-        issue = FakeIssue("TEST-1")
-        full_issue = {
-            "key": "TEST-9",
-            "summary": "Do the thing",
-            "description": "a very long body " * 100,
-            "status": {"self": "https://api/…", "id": "1", "key": "open", "display": "Открыт"},
-            "assignee": {"self": "https://api/…", "id": "42", "display": "J. Smith"},
-            "followers": [{"id": "7"}, {"id": "8"}],
-            "boards": [{"id": "b1", "name": "Board"}],
-            "epic": {"self": "https://api/…", "id": "100", "key": "TEST-1", "display": "Epic"},
-        }
-        sdk_client = FakeSdkClient(issue, find_result=[full_issue])
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.search_issues(per_page=5)
-
-        self.assertEqual(
-            result,
-            [
-                {
-                    "key": "TEST-9",
-                    "summary": "Do the thing",
-                    "status": {"id": "1", "key": "open", "display": "Открыт"},
-                    "assignee": {"id": "42", "display": "J. Smith"},
-                    "epic": {"id": "100", "key": "TEST-1", "display": "Epic"},
-                }
-            ],
-        )
-
-    def test_search_issues_full_returns_complete_objects(self):
-        issue = FakeIssue("TEST-1")
-        full_issue = {
-            "key": "TEST-9",
-            "summary": "Do the thing",
-            "description": "body",
-            "status": {"self": "https://api/…", "id": "1", "key": "open"},
-        }
-        sdk_client = FakeSdkClient(issue, find_result=[full_issue])
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.search_issues(per_page=5, full=True)
-
-        # full=True keeps every field but transport noise (`self`) is still stripped.
-        self.assertEqual(
-            result,
-            [
-                {
-                    "key": "TEST-9",
-                    "summary": "Do the thing",
-                    "description": "body",
-                    "status": {"id": "1", "key": "open"},
-                }
-            ],
-        )
-
-    def test_link_issue_creates_link_via_sdk(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        client.link_issue("TEST-1", "relates", "TEST-2")
-
-        self.assertEqual(issue.links.created, [{"relationship": "relates", "issue": "TEST-2"}])
-
-    def test_list_links_returns_issue_links(self):
-        link = FakeLink("100", {"key": "TEST-2"})
-        issue = FakeIssue("TEST-1", links=[link])
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.list_links("TEST-1"), [{"id": "100", "object": {"key": "TEST-2"}}])
-
-    def test_unlink_issue_deletes_matching_link(self):
-        issue = FakeIssue("TEST-1", links=[FakeLink("100", {"key": "TEST-2"})])
-        sdk_client = FakeSdkClient(issue)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.unlink_issue("TEST-1", "100")
-
-        self.assertEqual(sdk_client._connection.deleted, ["/v2/issues/links/100"])
-        self.assertEqual(result, {"deleted": "100", "issue": "TEST-1"})
-
-    def test_unlink_issue_unknown_id_raises(self):
-        issue = FakeIssue("TEST-1", links=[FakeLink("100", {})])
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        with self.assertRaises(ValueError):
-            client.unlink_issue("TEST-1", "999")
-
-    def test_reference_dictionaries_use_sdk_collections(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.list_queues(), [{"key": "TEST"}])
-        self.assertEqual(client.list_users(), [{"id": "user1"}])
-        self.assertEqual(client.list_statuses(), [{"key": "open"}])
-        self.assertEqual(client.list_issue_types(), [{"key": "bug"}])
-        self.assertEqual(client.list_priorities(), [{"key": "normal"}])
-        self.assertEqual(client.list_fields(), [{"id": "summary"}])
-        self.assertEqual(client.list_link_types(), [{"id": "relates"}])
-
-    def test_queue_versions_and_components(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.list_queue_versions("TEST"), [{"id": "v1"}])
-        self.assertEqual(client.list_queue_components("TEST"), [{"id": "c1"}])
-
-    def test_read_only_activity_collections(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.get_changelog("TEST-1"), [{"id": "cl1"}])
-        self.assertEqual(client.list_worklog("TEST-1"), [{"id": "wl1"}])
-        self.assertEqual(client.list_checklist("TEST-1"), [{"id": "ci1"}])
-        self.assertEqual(
-            client.list_attachments("TEST-1"),
-            [{"id": "att1", "name": "a.txt", "size": 12}],
-        )
-
-    def test_add_worklog_creates_record(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        client.add_worklog("TEST-1", "PT1H", comment="did work")
-
-        self.assertEqual(issue.worklog.created, [{"duration": "PT1H", "comment": "did work"}])
-
-    def test_add_checklist_item_creates_entry(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        client.add_checklist_item("TEST-1", "step 1", checked=True)
-
-        self.assertEqual(issue.checklist_items.created, [{"text": "step 1", "checked": True}])
-
-    def test_download_attachment_writes_bytes_to_dir(self):
-        import os
-        import tempfile
-
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        with tempfile.TemporaryDirectory() as directory:
-            result = client.download_attachment("TEST-1", "att1", directory)
-
-            expected_path = os.path.join(directory, "a.txt")
-            self.assertEqual(result, {"path": expected_path, "name": "a.txt", "size": 12})
-            with open(expected_path, "rb") as handle:
-                self.assertEqual(handle.read(), b"chunk1chunk2")
-
-    def test_download_attachment_sanitizes_filename(self):
-        import os
-        import tempfile
-
-        issue = FakeIssue("TEST-1")
-        issue.attachments = FakeAttachments([FakeAttachment("att9", "../evil.txt")])
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        with tempfile.TemporaryDirectory() as directory:
-            result = client.download_attachment("TEST-1", "att9", directory)
-
-            self.assertEqual(os.path.dirname(result["path"]), directory)
-            self.assertEqual(result["name"], "evil.txt")
-
-    def test_upload_attachment_creates_via_sdk(self):
-        import os
-        import tempfile
-
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "up.txt")
-            with open(path, "wb") as handle:
-                handle.write(b"data")
-
-            client.upload_attachment("TEST-1", path, filename="renamed.txt")
-
+        self.assertEqual(config.base_url, "https://tracker.example")
+        self.assertEqual(config.timeout, 5.0)
+
+    def test_api_root_always_targets_v3(self):
+        # A /v2 or /v3 suffix left over in an old config is dropped: the version
+        # belongs to the path this client builds, not to the configured host.
+        for base in ("https://api.tracker.yandex.net", "https://api.tracker.yandex.net/v2"):
             self.assertEqual(
-                issue.attachments.created,
-                [{"file": path, "params": {"filename": "renamed.txt"}}],
+                _config(base_url=base).api_root, "https://api.tracker.yandex.net/v3"
             )
 
-    def test_upload_attachment_missing_file_raises(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
+    def test_oauth_scheme_and_org_header(self):
+        headers = _config().headers()
+        self.assertEqual(headers["Authorization"], "OAuth tkn")
+        self.assertEqual(headers["X-Org-Id"], "42")
+        self.assertNotIn("X-Cloud-Org-Id", headers)
 
+    def test_cloud_org_wins_and_bearer_scheme_passes_through(self):
+        headers = _config(cloud_org_id="cloud-1", auth_scheme="Bearer").headers()
+        self.assertEqual(headers["Authorization"], "Bearer tkn")
+        self.assertEqual(headers["X-Cloud-Org-Id"], "cloud-1")
+        self.assertNotIn("X-Org-Id", headers)
+
+
+class GivenTests(unittest.TestCase):
+    def test_drops_only_none(self):
+        self.assertEqual(
+            given(a=1, b=None, c=False, d=""),
+            {"a": 1, "c": False, "d": ""},
+        )
+
+
+class RequestTests(unittest.TestCase):
+    def test_builds_a_v3_url_and_passes_the_timeout(self):
+        client, session = _client(FakeResponse(json_body={"key": "TEST-1"}))
+        self.assertEqual(client.request("GET", "/issues/TEST-1"), {"key": "TEST-1"})
+        self.assertEqual(session.last["method"], "GET")
+        self.assertEqual(session.last["url"], "https://api.tracker.yandex.net/v3/issues/TEST-1")
+        self.assertEqual(session.last["timeout"], 30.0)
+
+    def test_sends_params_and_body(self):
+        client, session = _client()
+        client.request("POST", "/issues/_search", params={"perPage": 5}, json={"queue": "TEST"})
+        self.assertEqual(session.last["params"], {"perPage": 5})
+        self.assertEqual(session.last["json"], {"queue": "TEST"})
+
+    def test_booleans_go_out_lowercase(self):
+        # requests would urlencode a Python bool as True/False; every documented
+        # boolean parameter is a JSON boolean.
+        client, session = _client()
+        client.request("POST", "/issues/", params={"notify": False})
+        self.assertEqual(session.last["params"], {"notify": "false"})
+        client.request("GET", "/priorities", params={"localized": True})
+        self.assertEqual(session.last["params"], {"localized": "true"})
+
+    def test_booleans_inside_a_repeated_key_are_converted_too(self):
+        client, session = _client()
+        client.request("GET", "/worklog", params={"createdAt": ["from:x", True]})
+        self.assertEqual(session.last["params"], {"createdAt": ["from:x", "true"]})
+
+    def test_empty_params_are_not_sent(self):
+        client, session = _client()
+        client.request("GET", "/users")
+        self.assertIsNone(session.last["params"])
+
+    def test_no_content_decodes_to_none(self):
+        client, _ = _client(FakeResponse(status_code=204))
+        self.assertIsNone(client.request("DELETE", "/issues/TEST-1/comments/1"))
+
+    def test_non_json_body_falls_back_to_text(self):
+        client, _ = _client(FakeResponse(text="plain"))
+        self.assertEqual(client.request("GET", "/whatever"), "plain")
+
+    def test_session_carries_the_auth_headers(self):
+        # The real session is built once and reused, so the headers must live on
+        # it rather than being rebuilt per request.
+        client = Tracker(config=_config(cloud_org_id="cloud-1"))
+        self.assertEqual(client._session.headers["X-Cloud-Org-Id"], "cloud-1")
+
+
+class ErrorTests(unittest.TestCase):
+    def test_error_messages_field_becomes_the_message(self):
+        body = {"errorMessages": ["Issue not found"], "statusCode": 404}
+        client, _ = _client(FakeResponse(status_code=404, json_body=body, reason="Not Found"))
+        with self.assertRaises(TrackerApiError) as ctx:
+            client.request("GET", "/issues/NOPE-1")
+        self.assertEqual(ctx.exception.status, 404)
+        self.assertIn("Issue not found", str(ctx.exception))
+        self.assertEqual(ctx.exception.payload, body)
+
+    def test_errors_map_becomes_the_message(self):
+        body = {"errors": {"summary": "must not be empty"}}
+        client, _ = _client(FakeResponse(status_code=422, json_body=body))
+        with self.assertRaises(TrackerApiError) as ctx:
+            client.request("POST", "/issues/")
+        self.assertIn("summary: must not be empty", str(ctx.exception))
+
+    def test_unknown_error_shape_falls_back_to_the_raw_body(self):
+        # The error body shape is not documented, so an unexpected one must still
+        # reach the caller instead of being swallowed.
+        client, _ = _client(FakeResponse(status_code=500, text="gateway exploded"))
+        with self.assertRaises(TrackerApiError) as ctx:
+            client.request("GET", "/issues/TEST-1")
+        self.assertIn("gateway exploded", str(ctx.exception))
+
+    def test_empty_error_body_falls_back_to_the_reason(self):
+        client, _ = _client(FakeResponse(status_code=403, text="", reason="Forbidden"))
+        with self.assertRaises(TrackerApiError) as ctx:
+            client.request("GET", "/issues/TEST-1")
+        self.assertIn("Forbidden", str(ctx.exception))
+
+    def test_transport_failure_becomes_a_status_zero_api_error(self):
+        class Broken:
+            headers = {}
+
+            def request(self, *args, **kwargs):
+                raise requests.ConnectionError("no route to host")
+
+        client = Tracker(config=_config(), session=Broken())
+        with self.assertRaises(TrackerApiError) as ctx:
+            client.request("GET", "/issues/TEST-1")
+        self.assertEqual(ctx.exception.status, 0)
+        self.assertIn("Failed to reach Yandex Tracker", str(ctx.exception))
+
+
+class DownloadTests(unittest.TestCase):
+    def test_streams_to_disk_and_reports_where_it_landed(self):
+        client, session = _client(FakeResponse(chunks=[b"abc", b"de"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            result = client.download("/issues/TEST-1/attachments/7/report.txt", tmp, "report.txt")
+            self.assertEqual(result, {"path": os.path.join(tmp, "report.txt"), "name": "report.txt", "size": 5})
+            with open(result["path"], "rb") as handle:
+                self.assertEqual(handle.read(), b"abcde")
+        self.assertTrue(session.last["stream"])
+
+    def test_a_traversing_file_name_cannot_escape_the_destination(self):
+        client, _ = _client(FakeResponse(chunks=[b"x"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            result = client.download("/issues/TEST-1/attachments/7/evil", tmp, "../evil.txt")
+            self.assertEqual(os.path.dirname(result["path"]), tmp)
+            self.assertEqual(result["name"], "evil.txt")
+
+    def test_creates_the_destination_directory(self):
+        client, _ = _client(FakeResponse(chunks=[b"x"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            nested = os.path.join(tmp, "a", "b")
+            result = client.download("/issues/TEST-1/attachments/7/f.txt", nested, "f.txt")
+            self.assertTrue(os.path.isfile(result["path"]))
+
+
+class UploadTests(unittest.TestCase):
+    def test_posts_the_file_under_the_documented_part_name(self):
+        client, session = _client(FakeResponse(json_body={"id": "7"}))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "notes.txt")
+            with open(path, "wb") as handle:
+                handle.write(b"hello")
+            client.upload("/issues/TEST-1/attachments/", path, params={"filename": "renamed.txt"})
+        self.assertEqual(session.last["method"], "POST")
+        self.assertEqual(session.last["params"], {"filename": "renamed.txt"})
+        name, handle = session.last["files"]["file"]
+        self.assertEqual(name, "notes.txt")
+
+    def test_a_missing_file_is_an_argument_error_not_a_transport_error(self):
+        client, session = _client()
         with self.assertRaises(ValueError):
-            client.upload_attachment("TEST-1", "/no/such/file.xyz")
-
-    def test_delete_comment_calls_sdk_delete(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        result = client.delete_comment("TEST-1", "1")
-
-        self.assertEqual(result, {"deleted": "1", "issue": "TEST-1"})
-        self.assertEqual(issue.comments.deleted, ["1"])
-
-    def test_delete_attachment_calls_sdk_delete(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        result = client.delete_attachment("TEST-1", "att1")
-
-        self.assertEqual(result, {"deleted": "att1", "issue": "TEST-1"})
-        self.assertEqual(issue.attachments["att1"].deleted_calls, 1)
-
-    def test_get_user_reads_from_users_collection(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        self.assertEqual(client.get_user("user1"), {"id": "user1"})
-
-    def test_get_current_user_reads_myself(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        # `self` is stripped as transport noise by _to_plain.
-        self.assertEqual(
-            client.get_current_user(),
-            {"login": "me", "uid": 42},
-        )
-
-    def test_list_users_passes_server_side_filters(self):
-        issue = FakeIssue("TEST-1")
-        sdk_client = FakeSdkClient(issue)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        result = client.list_users(email="a@b.c", group="42", per_page=50)
-
-        self.assertEqual(result, [{"id": "user1"}])
-        self.assertEqual(
-            sdk_client.users.get_all_calls,
-            [{"email": "a@b.c", "group": "42", "perPage": 50}],
-        )
-
-    def test_list_users_without_filters_sends_no_params(self):
-        issue = FakeIssue("TEST-1")
-        sdk_client = FakeSdkClient(issue)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        client.list_users()
-
-        self.assertEqual(sdk_client.users.get_all_calls, [{}])
-
-    def test_list_queue_local_fields(self):
-        issue = FakeIssue("TEST-1")
-        queue = FakeQueue("TEST", local_fields=[{"id": "customField"}])
-        client = YandexTrackerClient(
-            tracker_client=FakeSdkClient(issue, queues=[queue])
-        )
-
-        self.assertEqual(
-            client.list_queue_local_fields("TEST"), [{"id": "customField"}]
-        )
-
-    def test_list_queue_tags_uses_raw_connection(self):
-        issue = FakeIssue("TEST-1")
-        sdk_client = FakeSdkClient(issue)
-        client = YandexTrackerClient(tracker_client=sdk_client)
-
-        self.assertEqual(client.list_queue_tags("TEST"), ["backend", "urgent"])
-        self.assertEqual(sdk_client._connection.gets, ["/v2/queues/TEST/tags"])
-
-    def test_get_changelog_passes_filters(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        result = client.get_changelog(
-            "TEST-1", field="status", change_type="IssueWorkflow", per_page=10
-        )
-
-        self.assertEqual(result, [{"id": "cl1"}])
-        self.assertEqual(
-            issue.changelog.get_all_calls,
-            [{"field": "status", "type": "IssueWorkflow", "perPage": 10}],
-        )
-
-    def test_get_active_sprint_returns_the_in_progress_sprint(self):
-        board = FakeBoard(
-            42,
-            sprints=[
-                {"id": "1", "name": "Sprint 1", "status": "released"},
-                {"id": "2", "name": "Sprint 2", "status": "in_progress"},
-                {"id": "3", "name": "Sprint 3", "status": "draft"},
-            ],
-        )
-        client = YandexTrackerClient(
-            tracker_client=FakeSdkClient(FakeIssue("TEST-1"), boards=[board])
-        )
-
-        self.assertEqual(
-            client.get_active_sprint("42"),
-            {"id": "2", "name": "Sprint 2", "status": "in_progress"},
-        )
-
-    def test_get_active_sprint_returns_none_between_sprints(self):
-        board = FakeBoard(42, sprints=[{"id": "1", "status": "released"}])
-        client = YandexTrackerClient(
-            tracker_client=FakeSdkClient(FakeIssue("TEST-1"), boards=[board])
-        )
-
-        self.assertIsNone(client.get_active_sprint("42"))
-
-    def test_call_sdk_wraps_transport_errors_as_api_errors(self):
-        issue = FakeIssue("TEST-1")
-        client = YandexTrackerClient(tracker_client=FakeSdkClient(issue))
-
-        def boom(_client):
-            raise ConnectionError("dns failure")
-
-        with self.assertRaises(TrackerApiError):
-            client._call_sdk(boom)
+            client.upload("/issues/TEST-1/attachments/", "/no/such/file")
+        self.assertEqual(session.calls, [])
 
 
 if __name__ == "__main__":

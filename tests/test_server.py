@@ -1,175 +1,268 @@
 import json
+import re
 import unittest
 
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 
-import mcp_yandex_tracker as server
-from mcp_yandex_tracker import TrackerApiError, TrackerConfigError, YandexTrackerClient
+import mcp_yandex_tracker  # noqa: F401 - importing the package registers the tools
+from mcp_yandex_tracker import Tracker, TrackerApiError, TrackerConfigError
+from mcp_yandex_tracker import server
 
 
-class FakeClient:
-    def __init__(self):
+class FakeTracker:
+    """Records the HTTP call a tool asks for, without making one."""
+
+    def __init__(self, result=None):
         self.calls = []
+        self.result = {"ok": True} if result is None else result
 
-    def get_issue(self, issue_key):
-        self.calls.append(("get_issue", issue_key))
-        return {"key": issue_key}
+    def request(self, method, path, *, params=None, json=None, files=None, headers=None):
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                # Mirror the real transport, which turns an empty mapping into no
+                # query string / no header at all.
+                "params": params or None,
+                "json": json,
+                "files": files,
+                "headers": headers or None,
+            }
+        )
+        return self.result
 
-    def search_issues(self, **kwargs):
-        self.calls.append(("search_issues", kwargs))
-        return [{"key": "TEST-1"}]
+    def upload(self, path, file_path, *, params=None):
+        self.calls.append(
+            {"method": "POST", "path": path, "params": params, "filePath": file_path}
+        )
+        return self.result
 
-    def create_issue(self, **kwargs):
-        self.calls.append(("create_issue", kwargs))
-        return {"key": "TEST-2"}
+    def download(self, path, dest_dir, filename):
+        self.calls.append(
+            {"method": "GET", "path": path, "destDir": dest_dir, "fileName": filename}
+        )
+        return {"path": f"{dest_dir}/{filename}", "name": filename, "size": 0}
 
-    def update_issue(self, issue_key, fields):
-        self.calls.append(("update_issue", issue_key, fields))
-        return {"key": issue_key, **fields}
-
-    def add_comment(self, issue_key, text):
-        self.calls.append(("add_comment", issue_key, text))
-        return {"id": 1, "text": text}
-
-    def list_comments(self, issue_key):
-        self.calls.append(("list_comments", issue_key))
-        return [{"id": 1}]
-
-    def delete_comment(self, issue_key, comment_id):
-        self.calls.append(("delete_comment", issue_key, comment_id))
-        return {"deleted": comment_id, "issue": issue_key}
-
-    def list_transitions(self, issue_key):
-        self.calls.append(("list_transitions", issue_key))
-        return [{"id": "start", "display": "Start progress", "to": {"key": "inProgress"}}]
-
-    def move_issue_status(self, issue_key, status, fields=None):
-        self.calls.append(("move_issue_status", issue_key, status, fields))
-        return [{"id": "close", "to": {"key": "closed"}}]
-
-    def execute_transition(self, issue_key, transition_id, fields=None):
-        self.calls.append(("execute_transition", issue_key, transition_id, fields))
-        return {"transition": transition_id}
-
-    def link_issue(self, issue_key, relationship, target_issue):
-        self.calls.append(("link_issue", issue_key, relationship, target_issue))
-        return {"linked": target_issue}
-
-    def list_links(self, issue_key):
-        self.calls.append(("list_links", issue_key))
-        return [{"id": "100"}]
-
-    def unlink_issue(self, issue_key, link_id):
-        self.calls.append(("unlink_issue", issue_key, link_id))
-        return {"deleted": link_id}
-
-    def list_queues(self):
-        self.calls.append(("list_queues",))
-        return [{"key": "TEST"}]
-
-    def list_users(self, email=None, group=None, per_page=None):
-        self.calls.append(("list_users", email, group, per_page))
-        return [{"id": "user1"}]
-
-    def get_user(self, login_or_uid):
-        self.calls.append(("get_user", login_or_uid))
-        return {"login": login_or_uid}
-
-    def get_current_user(self):
-        self.calls.append(("get_current_user",))
-        return {"login": "me"}
-
-    def list_statuses(self):
-        self.calls.append(("list_statuses",))
-        return [{"key": "open"}]
-
-    def list_issue_types(self):
-        self.calls.append(("list_issue_types",))
-        return [{"key": "bug"}]
-
-    def list_priorities(self):
-        self.calls.append(("list_priorities",))
-        return [{"key": "normal"}]
-
-    def list_fields(self):
-        self.calls.append(("list_fields",))
-        return [{"id": "summary"}]
-
-    def list_link_types(self):
-        self.calls.append(("list_link_types",))
-        return [{"id": "relates"}]
-
-    def list_queue_versions(self, queue):
-        self.calls.append(("list_queue_versions", queue))
-        return [{"id": "v1"}]
-
-    def list_queue_components(self, queue):
-        self.calls.append(("list_queue_components", queue))
-        return [{"id": "c1"}]
-
-    def list_queue_local_fields(self, queue):
-        self.calls.append(("list_queue_local_fields", queue))
-        return [{"id": "customField"}]
-
-    def list_queue_tags(self, queue):
-        self.calls.append(("list_queue_tags", queue))
-        return ["backend", "urgent"]
-
-    def get_active_sprint(self, board_id):
-        self.calls.append(("get_active_sprint", board_id))
-        return {"id": "2", "name": "Sprint 2", "status": "in_progress"}
-
-    def get_changelog(self, issue_key, field=None, change_type=None, per_page=None):
-        self.calls.append(("get_changelog", issue_key, field, change_type, per_page))
-        return [{"id": "cl1"}]
-
-    def list_worklog(self, issue_key):
-        self.calls.append(("list_worklog", issue_key))
-        return [{"id": "wl1"}]
-
-    def add_worklog(self, issue_key, duration, comment=None, start=None):
-        self.calls.append(("add_worklog", issue_key, duration, comment, start))
-        return {"id": "wl", "duration": duration}
-
-    def list_checklist(self, issue_key):
-        self.calls.append(("list_checklist", issue_key))
-        return [{"id": "ci1"}]
-
-    def add_checklist_item(self, issue_key, text, checked=False):
-        self.calls.append(("add_checklist_item", issue_key, text, checked))
-        return {"id": "ci", "text": text}
-
-    def list_attachments(self, issue_key):
-        self.calls.append(("list_attachments", issue_key))
-        return [{"id": "att1"}]
-
-    def download_attachment(self, issue_key, attachment_id, dest_dir, filename=None):
-        self.calls.append(("download_attachment", issue_key, attachment_id, dest_dir, filename))
-        return {"path": f"{dest_dir}/a.txt"}
-
-    def upload_attachment(self, issue_key, file_path, filename=None):
-        self.calls.append(("upload_attachment", issue_key, file_path, filename))
-        return {"id": "att-new"}
-
-    def delete_attachment(self, issue_key, attachment_id):
-        self.calls.append(("delete_attachment", issue_key, attachment_id))
-        return {"deleted": attachment_id, "issue": issue_key}
+    @property
+    def last(self):
+        return self.calls[-1]
 
 
 def _use_client(client):
-    """Point the server's lazy singleton at a specific (fake) client."""
+    """Point the server's lazy singleton at a specific (fake) client.
+
+    This must patch `mcp_yandex_tracker.server`, the module `get_client` actually
+    reads its globals from — patching the package would silently leave the real
+    client in place and send the suite at a live Tracker.
+    """
     server._client = None
     server._client_factory = lambda: client
 
 
-class ServerTests(unittest.IsolatedAsyncioTestCase):
+# Every tool docstring ends with the endpoint it wraps and the page it was
+# written from. Both are load-bearing: the tests below hold the code to them.
+_ENDPOINT = re.compile(r"^(GET|POST|PATCH|DELETE) (/v3/\S*)$", re.MULTILINE)
+_DOC_URL = re.compile(
+    r"^https://yandex\.ru/support/tracker/en/api/[\w/-]+\.md$", re.MULTILINE
+)
+
+
+def _sample(name, schema):
+    # A stand-in value for a required argument, derived from its declared type.
+    # Strings become `<name>` so a path placeholder is recognisable in the URL.
+    kind = schema.get("type")
+    if kind is None:
+        for option in schema.get("anyOf", []):
+            if option.get("type") not in (None, "null"):
+                kind = option["type"]
+                break
+    if kind in ("integer", "number"):
+        return 1
+    if kind == "boolean":
+        return True
+    if kind == "array":
+        return []
+    if kind == "object":
+        return {}
+    return f"<{name}>"
+
+
+def _required_arguments(tool):
+    schema = tool.input_schema
+    properties = schema.get("properties", {})
+    return {
+        name: _sample(name, properties.get(name, {}))
+        for name in schema.get("required", [])
+    }
+
+
+class ToolContractTests(unittest.IsolatedAsyncioTestCase):
+    """The tool surface must be exactly the documented API surface.
+
+    Rather than restating every endpoint in a fixture, these read the endpoint out
+    of each tool's own docstring and then check the tool really issues it. A tool
+    whose docstring drifts from its code fails here, and so does one that reaches
+    a path nobody documented.
+    """
+
     def setUp(self):
-        self.fake = FakeClient()
+        self.fake = FakeTracker()
         _use_client(self.fake)
 
     def tearDown(self):
         server._client = None
-        server._client_factory = YandexTrackerClient
+        server._client_factory = Tracker
+
+    async def test_every_tool_names_its_endpoint_and_its_doc_page(self):
+        for tool in await server.mcp.list_tools():
+            with self.subTest(tool=tool.name):
+                self.assertTrue(tool.name.startswith("tracker_"))
+                self.assertIsNotNone(
+                    _ENDPOINT.search(tool.description or ""),
+                    "docstring must carry a `<METHOD> /v3/<path>` line",
+                )
+                self.assertIsNotNone(
+                    _DOC_URL.search(tool.description or ""),
+                    "docstring must link to the documentation page it came from",
+                )
+
+    async def test_every_tool_calls_the_endpoint_its_docstring_claims(self):
+        for tool in await server.mcp.list_tools():
+            with self.subTest(tool=tool.name):
+                method, doc_path = _ENDPOINT.search(tool.description).groups()
+                arguments = _required_arguments(tool)
+                self.fake.calls.clear()
+                result = await server.mcp.call_tool(tool.name, arguments)
+                self.assertFalse(result.is_error, result.content[0].text if result.content else "")
+                self.assertEqual(len(self.fake.calls), 1, "one tool, one request")
+                expected = doc_path[len("/v3") :].format(
+                    **{k: v for k, v in arguments.items() if isinstance(v, str)}
+                )
+                self.assertEqual(self.fake.last["method"], method)
+                self.assertEqual(self.fake.last["path"], expected)
+
+    async def test_tools_have_no_output_schema(self):
+        # structured_output=False: one compact JSON text block, no duplicating
+        # structuredContent and no output schema to pay for in every tools/list.
+        for tool in await server.mcp.list_tools():
+            with self.subTest(tool=tool.name):
+                self.assertIsNone(tool.output_schema)
+
+    async def test_optional_arguments_are_omitted_from_the_request(self):
+        # `given()` drops unset arguments so Tracker never receives `null` for a
+        # parameter the caller simply did not use.
+        await server.mcp.call_tool("tracker_get_users", {})
+        self.assertIsNone(self.fake.last["params"])
+        self.assertIsNone(self.fake.last["json"])
+
+    async def test_optional_arguments_are_sent_when_supplied(self):
+        await server.mcp.call_tool("tracker_get_users", {"perPage": 10})
+        self.assertEqual(self.fake.last["params"], {"perPage": 10})
+
+    async def test_every_tool_module_is_registered(self):
+        # tools/__init__.py registers by importing; a module dropped from that
+        # list would silently vanish from the server.
+        import importlib
+
+        for module in ("issues", "queues", "boards", "entities", "admin", "users"):
+            with self.subTest(module=module):
+                names = {
+                    name
+                    for name in importlib.import_module(
+                        f"mcp_yandex_tracker.tools.{module}"
+                    ).__dict__
+                    if name.startswith("tracker_")
+                }
+                self.assertTrue(names, f"{module} defines no tools")
+                registered = {tool.name for tool in await server.mcp.list_tools()}
+                self.assertLessEqual(names, registered)
+
+
+class DeviationTests(unittest.IsolatedAsyncioTestCase):
+    """The handful of places a tool cannot mirror its endpoint byte for byte.
+
+    Each of these is listed in docs/TOOLS.md; they are the only ones, so they are
+    pinned here rather than left to the generic contract test above.
+    """
+
+    def setUp(self):
+        self.fake = FakeTracker()
+        _use_client(self.fake)
+
+    def tearDown(self):
+        server._client = None
+        server._client_factory = Tracker
+
+    async def test_from_underscore_reaches_tracker_as_from(self):
+        # `from` is a Python keyword, so the argument is spelled from_ — but the
+        # query string must still say `from`.
+        await server.mcp.call_tool(
+            "tracker_get_entity_events",
+            {"entityType": "project", "entityId": "1", "from_": "2026-01-01"},
+        )
+        self.assertEqual(self.fake.last["params"].get("from"), "2026-01-01")
+        self.assertNotIn("from_", self.fake.last["params"])
+
+    async def test_if_match_carries_the_version_of_a_board_edit(self):
+        # The board, column and sprint pages document optimistic locking as a
+        # header rather than a parameter.
+        await server.mcp.call_tool("tracker_patch_board", {"boardId": "42", "version": 7})
+        self.assertEqual(self.fake.last["headers"], {"If-Match": '"7"'})
+
+    async def test_omitting_the_version_sends_no_if_match(self):
+        await server.mcp.call_tool("tracker_patch_board", {"boardId": "42", "name": "Board"})
+        self.assertIsNone(self.fake.last["headers"])
+
+    async def test_query_parameter_version_stays_a_query_parameter(self):
+        # Where a page documents `version` as a real query parameter, it must not
+        # become a header.
+        await server.mcp.call_tool("tracker_patch_issue", {"issueId": "TEST-1", "version": 3})
+        self.assertEqual(self.fake.last["params"], {"version": 3})
+        self.assertIsNone(self.fake.last["headers"])
+
+    async def test_download_streams_to_the_requested_directory(self):
+        result = await server.mcp.call_tool(
+            "tracker_get_attachment",
+            {"issueId": "TEST-1", "fileId": "7", "fileName": "report.txt", "destDir": "/tmp/x"},
+        )
+        self.assertEqual(self.fake.last["path"], "/issues/TEST-1/attachments/7/report.txt")
+        self.assertEqual(self.fake.last["destDir"], "/tmp/x")
+        self.assertEqual(self.fake.last["fileName"], "report.txt")
+        self.assertEqual(json.loads(result.content[0].text)["name"], "report.txt")
+
+    async def test_download_honours_a_local_name_override(self):
+        await server.mcp.call_tool(
+            "tracker_get_attachment",
+            {
+                "issueId": "TEST-1",
+                "fileId": "7",
+                "fileName": "report.txt",
+                "destDir": "/tmp/x",
+                "saveAs": "local.txt",
+            },
+        )
+        self.assertEqual(self.fake.last["fileName"], "local.txt")
+        # The remote path still uses the name Tracker knows the file by.
+        self.assertTrue(self.fake.last["path"].endswith("/report.txt"))
+
+    async def test_upload_sends_the_local_path_and_the_rename_parameter(self):
+        await server.mcp.call_tool(
+            "tracker_post_attachment",
+            {"issueId": "TEST-1", "filePath": "/tmp/a.txt", "filename": "b.txt"},
+        )
+        self.assertEqual(self.fake.last["path"], "/issues/TEST-1/attachments/")
+        self.assertEqual(self.fake.last["filePath"], "/tmp/a.txt")
+        self.assertEqual(self.fake.last["params"], {"filename": "b.txt"})
+
+
+class ProtocolTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.fake = FakeTracker()
+        _use_client(self.fake)
+
+    def tearDown(self):
+        server._client = None
+        server._client_factory = Tracker
 
     async def _text(self, name, arguments):
         result = await server.mcp.call_tool(name, arguments)
@@ -179,195 +272,81 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content[0].type, "text")
         return result.content[0].text
 
-    # --- Discovery ---------------------------------------------------------
-    async def test_exposes_all_tracker_tools(self):
-        tools = await server.mcp.list_tools()
-        names = {tool.name for tool in tools}
-        self.assertEqual(len(tools), 36)
-        for name in (
-            "tracker_get_issue",
-            "tracker_search_issues",
-            "tracker_add_comment",
-            "tracker_list_transitions",
-            "tracker_move_issue_status",
-            "tracker_link_issues",
-            "tracker_list_links",
-            "tracker_unlink_issues",
-            "tracker_list_queues",
-            "tracker_list_users",
-            "tracker_list_link_types",
-            "tracker_list_queue_versions",
-            "tracker_list_queue_components",
-            "tracker_get_changelog",
-            "tracker_list_worklog",
-            "tracker_add_worklog",
-            "tracker_list_checklist",
-            "tracker_add_checklist_item",
-            "tracker_list_attachments",
-            "tracker_download_attachment",
-            "tracker_upload_attachment",
-            "tracker_get_user",
-            "tracker_get_current_user",
-            "tracker_delete_comment",
-            "tracker_delete_attachment",
-            "tracker_list_queue_local_fields",
-            "tracker_list_queue_tags",
-            "tracker_get_active_sprint",
-        ):
-            self.assertIn(name, names)
+    async def test_tool_returns_the_payload_untouched(self):
+        # No projection, no field stripping: whatever Tracker sent is what the
+        # agent sees, `self` links and all.
+        payload = {"self": "https://api.tracker.yandex.net/v3/issues/TEST-1", "key": "TEST-1"}
+        _use_client(FakeTracker(payload))
+        text = await self._text("tracker_get_issue", {"issueId": "TEST-1"})
+        self.assertEqual(json.loads(text), payload)
 
-    async def test_initialize_advertises_our_version(self):
-        # serverInfo.version must report the module version, not the mcp package
-        # version (MCPServer defaults to the latter unless we set it explicitly).
-        opts = server.mcp._lowlevel_server.create_initialization_options()
-        self.assertEqual(opts.server_version, server.__version__)
-        self.assertEqual(opts.server_name, "mcp-yandex-tracker")
+    async def test_cyrillic_survives_the_round_trip(self):
+        _use_client(FakeTracker({"summary": "Тестовая задача"}))
+        text = await self._text("tracker_get_issue", {"issueId": "TEST-1"})
+        self.assertIn("Тестовая задача", text)
+        self.assertEqual(json.loads(text)["summary"], "Тестовая задача")
 
-    async def test_tools_have_no_output_schema(self):
-        # Token optimization: text-only responses (structured_output=False) must
-        # not publish an output schema or a duplicating structuredContent block.
-        tools = await server.mcp.list_tools()
-        with_schema = [tool.name for tool in tools if tool.output_schema is not None]
-        self.assertEqual(with_schema, [])
+    async def test_missing_required_argument_is_rejected(self):
+        with self.assertRaises(Exception):
+            await server.mcp.call_tool("tracker_get_issue", {})
 
-    async def test_required_arguments_are_declared(self):
-        tools = {tool.name: tool for tool in await server.mcp.list_tools()}
+    async def test_empty_required_string_is_rejected(self):
+        with self.assertRaises(Exception):
+            await server.mcp.call_tool("tracker_get_issue", {"issueId": ""})
+
+    async def test_api_error_surfaces_as_a_tool_error(self):
+        class Boom:
+            def request(self, *args, **kwargs):
+                raise TrackerApiError(404, "Issue not found")
+
+        _use_client(Boom())
+        with self.assertRaises(ToolError) as ctx:
+            await server.mcp.call_tool("tracker_get_issue", {"issueId": "TEST-1"})
+        self.assertIn("Issue not found", str(ctx.exception))
+
+    async def test_config_error_surfaces_as_a_tool_error(self):
+        def broken_factory():
+            raise TrackerConfigError("missing token")
+
+        server._client = None
+        server._client_factory = broken_factory
+        with self.assertRaises(ToolError) as ctx:
+            await server.mcp.call_tool("tracker_get_issue", {"issueId": "TEST-1"})
+        self.assertIn("missing token", str(ctx.exception))
+
+
+class ResourceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.fake = FakeTracker()
+        _use_client(self.fake)
+
+    def tearDown(self):
+        server._client = None
+        server._client_factory = Tracker
+
+    async def test_lists_the_static_resources_and_the_issue_template(self):
+        uris = {str(resource.uri) for resource in await server.mcp.list_resources()}
         self.assertEqual(
-            tools["tracker_get_issue"].input_schema.get("required"), ["issue_key"]
-        )
-        self.assertEqual(
-            tools["tracker_create_issue"].input_schema.get("required"),
-            ["queue", "summary"],
-        )
-
-    # --- Routing -----------------------------------------------------------
-    async def test_get_issue_returns_compact_text(self):
-        text = await self._text("tracker_get_issue", {"issue_key": "TEST-1"})
-        self.assertIn('"key":"TEST-1"', text)
-        self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
-
-    async def test_tools_route_to_client(self):
-        cases = [
-            ("tracker_get_user", {"login_or_uid": "jsmith"}, ("get_user", "jsmith")),
-            ("tracker_get_current_user", {}, ("get_current_user",)),
-            (
-                "tracker_delete_comment",
-                {"issue_key": "TEST-1", "comment_id": "5"},
-                ("delete_comment", "TEST-1", "5"),
-            ),
-            (
-                "tracker_delete_attachment",
-                {"issue_key": "TEST-1", "attachment_id": "att1"},
-                ("delete_attachment", "TEST-1", "att1"),
-            ),
-            (
-                "tracker_list_queue_local_fields",
-                {"queue": "TEST"},
-                ("list_queue_local_fields", "TEST"),
-            ),
-            ("tracker_list_queue_tags", {"queue": "TEST"}, ("list_queue_tags", "TEST")),
-            (
-                "tracker_get_active_sprint",
-                {"board_id": "42"},
-                ("get_active_sprint", "42"),
-            ),
-            (
-                "tracker_list_users",
-                {"email": "a@b.c", "group": "42", "per_page": 50},
-                ("list_users", "a@b.c", "42", 50),
-            ),
-            (
-                "tracker_get_changelog",
-                {"issue_key": "TEST-1", "field": "status", "type": "IssueWorkflow"},
-                ("get_changelog", "TEST-1", "status", "IssueWorkflow", None),
-            ),
-            (
-                "tracker_link_issues",
-                {"issue_key": "TEST-1", "relationship": "relates", "target_issue": "TEST-2"},
-                ("link_issue", "TEST-1", "relates", "TEST-2"),
-            ),
-            (
-                "tracker_unlink_issues",
-                {"issue_key": "TEST-1", "link_id": "100"},
-                ("unlink_issue", "TEST-1", "100"),
-            ),
-            (
-                "tracker_list_queue_versions",
-                {"queue": "TEST"},
-                ("list_queue_versions", "TEST"),
-            ),
-            (
-                "tracker_move_issue_status",
-                {"issue_key": "TEST-1", "status": "inProgress", "fields": {"comment": "starting"}},
-                ("move_issue_status", "TEST-1", "inProgress", {"comment": "starting"}),
-            ),
-            (
-                "tracker_add_worklog",
-                {"issue_key": "TEST-1", "duration": "PT1H", "comment": "x"},
-                ("add_worklog", "TEST-1", "PT1H", "x", None),
-            ),
-            (
-                "tracker_upload_attachment",
-                {"issue_key": "TEST-1", "file_path": "/tmp/up.txt"},
-                ("upload_attachment", "TEST-1", "/tmp/up.txt", None),
-            ),
-            (
-                "tracker_download_attachment",
-                {"issue_key": "TEST-1", "attachment_id": "att1", "dest_dir": "/tmp/dl"},
-                ("download_attachment", "TEST-1", "att1", "/tmp/dl", None),
-            ),
-        ]
-        for tool_name, arguments, expected_call in cases:
-            with self.subTest(tool=tool_name):
-                fake = FakeClient()
-                _use_client(fake)
-                await server.mcp.call_tool(tool_name, arguments)
-                self.assertEqual(fake.calls, [expected_call])
-
-    async def test_cyrillic_text_survives_round_trip(self):
-        # ensure_ascii=False keeps Cyrillic intact in the response payload.
-        text = "клик по лого → сброс дашборда «на главную»"
-        result = await self._text(
-            "tracker_add_comment", {"issue_key": "TEST-1", "text": text}
-        )
-        self.assertEqual(json.loads(result)["text"], text)
-
-    # --- Resources ---------------------------------------------------------
-    async def test_resources_and_template_listed(self):
-        static = {str(r.uri) for r in await server.mcp.list_resources()}
-        templates = {t.uri_template for t in await server.mcp.list_resource_templates()}
-        self.assertEqual(
-            static,
+            uris,
             {
                 "tracker://queues",
                 "tracker://statuses",
                 "tracker://priorities",
                 "tracker://issue-types",
                 "tracker://fields",
-                "tracker://link-types",
             },
         )
+        templates = {str(item.uri_template) for item in await server.mcp.list_resource_templates()}
         self.assertIn("tracker://issue/{key}", templates)
 
-    async def test_issue_resource_reads_via_client(self):
-        contents = list(await server.mcp.read_resource("tracker://issue/TEST-1"))
-        self.assertEqual(contents[0].mime_type, "application/json")
-        self.assertIn('"key":"TEST-1"', contents[0].content)
-        self.assertEqual(self.fake.calls, [("get_issue", "TEST-1")])
+    async def test_reading_a_resource_hits_the_documented_endpoint(self):
+        _use_client(FakeTracker([{"key": "TEST"}]))
+        contents = await server.mcp.read_resource("tracker://statuses")
+        self.assertEqual(json.loads(list(contents)[0].content), [{"key": "TEST"}])
 
-    async def test_reference_resource_reads_via_client(self):
-        contents = list(await server.mcp.read_resource("tracker://statuses"))
-        self.assertEqual(json.loads(contents[0].content), [{"key": "open"}])
-        self.assertEqual(self.fake.calls, [("list_statuses",)])
-
-    async def test_resource_error_surfaces_message(self):
-        # The resource wrapper maps a domain error to ResourceError, and
-        # MCPServer re-raises that untouched (mcp >= 2.1, our floor), so the
-        # Tracker detail reaches the caller verbatim. On 2.0 it was replaced by
-        # a generic "Error reading resource {uri}" -- raising the floor is what
-        # lets this assert the message itself rather than the cause chain.
+    async def test_resource_error_surfaces_the_tracker_message(self):
         class Boom:
-            def list_statuses(self):
+            def request(self, *args, **kwargs):
                 raise TrackerApiError(500, "boom")
 
         _use_client(Boom())
@@ -375,55 +354,14 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             await server.mcp.read_resource("tracker://statuses")
         self.assertIn("boom", str(ctx.exception))
 
-    # --- Errors ------------------------------------------------------------
-    async def test_missing_required_argument_is_tool_error(self):
-        with self.assertRaises(ToolError):
-            await server.mcp.call_tool("tracker_get_issue", {})
 
-    async def test_empty_required_string_is_tool_error(self):
-        # Required string args carry min_length=1, so an empty value is rejected
-        # by validation before the handler (and before any network round-trip).
-        with self.assertRaises(ToolError):
-            await server.mcp.call_tool("tracker_get_issue", {"issue_key": ""})
-        self.assertEqual(self.fake.calls, [])
-
-    async def test_invalid_per_page_is_tool_error(self):
-        with self.assertRaises(ToolError):
-            await server.mcp.call_tool(
-                "tracker_search_issues", {"query": "Queue: TEST", "per_page": "abc"}
-            )
-
-    async def test_api_error_surfaces_message(self):
-        class Boom:
-            def get_issue(self, issue_key):
-                raise TrackerApiError(404, "not found")
-
-        _use_client(Boom())
-        with self.assertRaises(ToolError) as ctx:
-            await server.mcp.call_tool("tracker_get_issue", {"issue_key": "TEST-1"})
-        self.assertIn("not found", str(ctx.exception))
-
-    async def test_client_configuration_error_surfaces_message(self):
-        def broken_factory():
-            raise TrackerConfigError("missing token")
-
-        server._client = None
-        server._client_factory = broken_factory
-        with self.assertRaises(ToolError) as ctx:
-            await server.mcp.call_tool("tracker_get_issue", {"issue_key": "TEST-1"})
-        self.assertIn("missing token", str(ctx.exception))
-
+class StdioTests(unittest.IsolatedAsyncioTestCase):
     async def test_stdio_transport_preserves_cyrillic(self):
         # End-to-end guard for the UTF-8 stdio path (MCPServer's stdio_server pins
         # UTF-8). Spawns the real server and round-trips a Cyrillic tool name
         # through the byte transport — it must come back intact in the error
         # message. Needs no Tracker credentials since an unknown-tool call never
         # reaches the API.
-        #
-        # This replaces the old hand-rolled cp1251 regression tests. It does NOT
-        # reproduce the Windows locale-switch scenario (native pipes on mac/linux
-        # are already UTF-8); the guarantee is now delegated to the mcp SDK, whose
-        # stdio_server re-wraps stdin/stdout as UTF-8 TextIOWrappers.
         import sys
 
         from mcp import ClientSession, StdioServerParameters

@@ -31,8 +31,8 @@ config error.
 
 | Variable                     | Default                          | Notes                                                            |
 | ---------------------------- | -------------------------------- | --------------------------------------------------------------- |
-| `YANDEX_TRACKER_AUTH_SCHEME` | `OAuth`                          | Set to `Bearer` for IAM tokens (routes the token as `iam_token`). |
-| `YANDEX_TRACKER_BASE_URL`    | `https://api.tracker.yandex.net` | A trailing `/v2` or `/v3` is split off into the SDK `api_version` (default `v2`). |
+| `YANDEX_TRACKER_AUTH_SCHEME` | `OAuth`                          | The `Authorization` header scheme. Set to `Bearer` for IAM tokens. |
+| `YANDEX_TRACKER_BASE_URL`    | `https://api.tracker.yandex.net` | Host only — the client always appends `/v3`. A leftover `/v2` or `/v3` suffix is stripped. |
 | `YANDEX_TRACKER_TIMEOUT`     | `30`                             | Request timeout in seconds (float).                             |
 
 ## Host configuration
@@ -75,7 +75,6 @@ Point the host at the console script `mcp-yandex-tracker` (installed by the
 package), or run it explicitly:
 
 - `python -m mcp_yandex_tracker`
-- `python mcp_yandex_tracker.py`
 
 ## Resources (@-mentions)
 
@@ -86,7 +85,7 @@ to act:
 
 - `@yandex-tracker:tracker://issue/TEST-123` — a single issue snapshot
 - `@yandex-tracker:tracker://statuses` (also `priorities`, `issue-types`,
-  `fields`, `link-types`, `queues`) — reference dictionaries
+  `fields`, `queues`) — reference dictionaries
 
 (Replace `yandex-tracker` with whatever name you gave the server in the host.)
 
@@ -118,9 +117,9 @@ org id.
 | Symptom                                          | Likely cause                                                                 |
 | ------------------------------------------------ | ---------------------------------------------------------------------------- |
 | Tool result with `isError: true`, "Set YANDEX_TRACKER_TOKEN…" | Token or org id missing from the host's env for this server.                 |
-| `isError: true` with `Yandex Tracker API error <status>` | The SDK reached Tracker but got a non-2xx (auth, permissions, missing issue). |
+| `isError: true` with `Yandex Tracker API error <status>` | The request reached Tracker but came back non-2xx (auth, permissions, missing issue). |
 | Host reports the server "crashed" or garbled     | Something wrote non-JSON to stdout. Only JSON-RPC may go to stdout.          |
-| `isError: true`, "Install yandex_tracker_client…"| The runtime is missing the SDK dependency.                                   |
+| `isError: true`, `Yandex Tracker API error 0: Failed to reach Yandex Tracker…` | The request never got a response — DNS, proxy, TLS or timeout. |
 | JSON-RPC `error` with code `-32601`/unsupported method | The host called a method the server does not implement (see [ARCHITECTURE.md](ARCHITECTURE.md)). |
 | `resources/read` (a `tracker://…` @-mention) fails with only `Error reading resource <uri>` | An mcp older than this server's 2.1 floor got installed — 2.0 replaced the handler's message with that generic one. Check the resolved version; on 2.1+ the real Tracker/config detail comes through. |
 
