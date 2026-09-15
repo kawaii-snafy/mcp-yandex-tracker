@@ -1,7 +1,14 @@
 # Integration guide
 
-How to connect Yandex Tracker MCP to an MCP host. For the tools themselves see
-[TOOLS.md](TOOLS.md).
+How to connect Yandex Tracker MCP to an MCP host. For the endpoints themselves
+see [TOOLS.md](TOOLS.md).
+
+The server advertises **three** tools — `tracker_api` (the catalogue of all 179
+Tracker endpoints, with their argument schemas on request), `tracker_read` and
+`tracker_call` (which run them). A host that lets you allow or deny tools
+individually only has those three to decide about: `tracker_read` is annotated
+read-only and is the one worth a standing permission; `tracker_call` is flagged
+destructive, so a host that confirms destructive calls will confirm every write.
 
 ## Transport
 
@@ -81,11 +88,14 @@ newer.
 
 ## Resources (@-mentions)
 
-Besides the `tracker_*` tools, the server exposes read-only **resources** under
-the `tracker://` scheme. In hosts that consume them (e.g. Claude Code), reference
-one with an `@`-mention to attach it as context — the agent still uses the tools
-to act:
+Besides the three tools, the server exposes read-only **resources** under the
+`tracker://` scheme. In hosts that consume them (e.g. Claude Code), reference one
+with an `@`-mention to attach it as context — the agent still uses the tools to
+act:
 
+- `@yandex-tracker:tracker://api` — the endpoint catalogue; `tracker://api/issues`
+  for one section, `tracker://api/tracker_get_issue` for one endpoint's arguments.
+  These reach no network and need no token.
 - `@yandex-tracker:tracker://issue/TEST-123` — a single issue snapshot
 - `@yandex-tracker:tracker://statuses` (also `priorities`, `issue-types`,
   `fields`, `queues`) — reference dictionaries
@@ -111,15 +121,20 @@ the server shuts down on EOF, often before it has answered `tools/list` — you
 then get only the `initialize` reply.
 
 `tools/list` needs no credentials, so it is the safest first check — a healthy
-server returns a JSON-RPC object listing the `tracker_*` tools. Any tool that
-actually touches Tracker (e.g. `tracker_get_issue`) will exercise the token and
-org id.
+server returns a JSON-RPC object listing `tracker_api`, `tracker_read` and
+`tracker_call`, the first of them carrying the whole endpoint catalogue in its
+description. `tracker_api` itself needs no token either; the first call that
+actually touches Tracker (e.g. `tracker_read` with `tracker_get_myself`) will
+exercise the token and org id.
 
 ## Troubleshooting
 
 | Symptom                                                                                     | Likely cause                                                                                                                                                                                          |
 | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tool result with `isError: true`, "Set YANDEX_TRACKER_TOKEN…"                               | Token or org id missing from the host's env for this server.                                                                                                                                          |
+| `isError: true`, `Unknown endpoint "…"`                                                     | The name is not in the registry. Every one is listed in `tracker_api`'s description and under `tracker://api`.                                                                                        |
+| `isError: true`, `"…" is a create endpoint — call it with tracker_call`                     | Right endpoint, wrong dispatcher. `(read)` in the catalogue means `tracker_read`; everything else is `tracker_call`.                                                                                  |
+| `isError: true` with `unrecognized_keys`                                                    | An argument name that is not in the endpoint's schema — arguments are validated strictly rather than dropped. Get the schema from `tracker_api`.                                                      |
 | `isError: true` with `Yandex Tracker API error <status>`                                    | The request reached Tracker but came back non-2xx (auth, permissions, missing issue).                                                                                                                 |
 | Host reports the server "crashed" or garbled                                                | Something wrote non-JSON to stdout. Only JSON-RPC may go to stdout.                                                                                                                                   |
 | `isError: true`, `Yandex Tracker API error 0: Failed to reach Yandex Tracker…`              | The request never got a response — DNS, proxy, TLS or timeout.                                                                                                                                        |

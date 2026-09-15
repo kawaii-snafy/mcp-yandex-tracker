@@ -10,17 +10,30 @@
 - **Only documented REST API v3 endpoints.** Tracker is reached with `fetch`
   through `Tracker.request()` in `src/client.ts`. Do not add a second HTTP path,
   an SDK, or an abstraction layer on top of it. The MCP side stays on the
-  official `@modelcontextprotocol/server`.
+  official `@modelcontextprotocol/server`. Retries are gated on whether a repeat
+  can duplicate anything: by method, plus `tracker.idempotent()`, which
+  `invoke()` hands to every `read` endpoint so the `/_search` POSTs back off on a
+  429 instead of failing.
 - **One tool per endpoint, nothing in between.** Parameter names are the API's
   own (`perPage`, `expand`, `markupType`), and the response is returned exactly
   as Tracker sent it — no reshaping, no filtering, no client-side pagination.
 - Tools are **data**: each is a `tool({ name, description, input, run })` entry in
-  the array its `src/tools/<section>.ts` exports. The server and the
-  `docs/TOOLS.md` generator read that same registry.
+  the array its `src/tools/<section>.ts` exports. `src/tools/index.ts` names every
+  module in `sections` — one place, read by the catalogue, the `tracker://api`
+  resource and the `docs/TOOLS.md` generator alike.
+- **The host sees three tools, not 179.** `src/dispatch.ts` projects the registry:
+  `tracker_api` carries the catalogue in its description and hands out argument
+  schemas on request, `tracker_read` runs the `read` endpoints and `tracker_call`
+  the rest. Registering all 179 cost ~55k tokens of every context, two thirds of
+  it argument schemas needed one at a time. A new endpoint still goes in
+  `src/tools/` and appears in the catalogue automatically — never add a tool
+  beside the dispatchers.
 - Every tool ships a `title` and MCP annotations. Both are derived — the title
   from the name, `readOnlyHint` / `destructiveHint` from the method in the
   description — so add `effect` to a tool only when its method misleads (a
-  `_search` POST, a GET that downloads to disk, a `_move`-style POST).
+  `_search` POST, a GET that downloads to disk, a `_move`-style POST). `effect`
+  now also picks the dispatcher, so a wrong one either hides a destructive call
+  behind `tracker_read`'s standing permission or makes a read prompt every time.
 - Keep dependencies minimal: only `@modelcontextprotocol/server` and `zod`. They
   are real `dependencies` — `tsc` compiles `src/` to `build/` and does not bundle
   — so a third one is a third thing every user downloads. HTTP is the built-in

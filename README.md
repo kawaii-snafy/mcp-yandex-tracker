@@ -8,10 +8,30 @@ workflows, triggers and components; boards, columns and sprints; projects,
 portfolios and goals; saved filters, dashboards, absences, users and the
 reference dictionaries.
 
-It is a thin wrapper on purpose: **one tool per documented endpoint**, the API's
-own parameter names on the way in, the API's own JSON on the way out. Every
-tool's description links to the documentation page it was written from, so the
-agent can always read the source of truth.
+It is a thin wrapper on purpose: **one tool per documented endpoint** — 179 of
+them — the API's own parameter names on the way in, the API's own JSON on the way
+out. Every endpoint's description links to the documentation page it was written
+from, so the agent can always read the source of truth.
+
+Those 179 do not go on the wire as 179 MCP tools, which would cost every
+conversation ~55k tokens of argument schemas before a word is said. Three tools
+do:
+
+| Tool           | What it is for                                                                       |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `tracker_api`  | The catalogue: every endpoint named in its description, argument schemas on request. |
+| `tracker_read` | Call an endpoint that only reads.                                                    |
+| `tracker_call` | Call an endpoint that creates, edits or deletes.                                     |
+
+An agent reads the catalogue, asks `tracker_api` for the schemas it needs, then
+calls. Same endpoints, same argument names, same responses — **~4.8k tokens**
+standing cost instead of 55k. The split between the two dispatchers is what keeps
+reads cheap in a host: `tracker_read` is annotated read-only and can be granted a
+standing permission, `tracker_call` is flagged destructive and gets confirmed.
+
+The catalogue is also readable as a resource — `tracker://api` for all of it,
+`tracker://api/issues` for one section, `tracker://api/tracker_get_issue` for one
+endpoint's schema.
 
 ## Usage with Codex
 
@@ -99,16 +119,16 @@ The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
 the server shuts down on EOF, often before it has answered `tools/list` — you
 then get only the `initialize` reply.
 
-The second response line should be a JSON-RPC object with `tracker_*` tools. The
-server is stdio-only, so stdout is reserved for MCP JSON-RPC messages (logs go
-to stderr).
+The second response line should be a JSON-RPC object listing `tracker_api`,
+`tracker_read` and `tracker_call`. The server is stdio-only, so stdout is
+reserved for MCP JSON-RPC messages (logs go to stderr).
 
 ## Documentation
 
 Deeper docs live in [`docs/`](docs/INDEX.md):
 
 - [INTEGRATION.md](docs/INTEGRATION.md) — connect the server to a host.
-- [TOOLS.md](docs/TOOLS.md) — every tool, its endpoint, and its doc page.
+- [TOOLS.md](docs/TOOLS.md) — the three tools, every endpoint, and its doc page.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the server works internally.
 - [EXTENDING.md](docs/EXTENDING.md) — add tools, rules, and scaling notes.
 

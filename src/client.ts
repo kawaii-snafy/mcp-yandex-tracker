@@ -22,6 +22,11 @@ export const API_VERSION = "v3";
  * but specifies neither a quota nor a Retry-After header, so back off on our own.
  */
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+/**
+ * Methods a repeat cannot duplicate anything with. A POST is excluded because
+ * repeating one usually creates a second object — but six of them only read
+ * (`/_search`, `/_count`), and for those the caller says so with `idempotent()`.
+ */
 const RETRY_METHODS = new Set(["GET", "HEAD", "OPTIONS", "DELETE"]);
 const RETRY_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 500;
@@ -158,10 +163,32 @@ type FetchLike = typeof fetch;
 export class Tracker {
   readonly config: TrackerConfig;
   readonly #fetch: FetchLike;
+  /** Whether a repeat is safe regardless of the HTTP method. See `idempotent()`. */
+  readonly #repeatable: boolean;
 
-  constructor(config: TrackerConfig = configFromEnv(), fetchImpl: FetchLike = fetch) {
+  constructor(
+    config: TrackerConfig = configFromEnv(),
+    fetchImpl: FetchLike = fetch,
+    repeatable = false,
+  ) {
     this.config = config;
     this.#fetch = fetchImpl;
+    this.#repeatable = repeatable;
+  }
+
+  /**
+   * The same client, for a call that can be repeated whatever its method.
+   *
+   * Retrying is gated on the HTTP method because the method is all this layer
+   * knows — and that leaves the six POSTs that only read (`/_search`,
+   * `/_count`) without a retry, which is exactly where 429 shows up most: a
+   * search is the call an agent makes constantly. Whether an endpoint changes
+   * anything is the registry's `effect`, so the decision is made where that is
+   * known and arrives here as a client. Two fields and a shared `fetch` — the
+   * connection pool is the same one.
+   */
+  idempotent(): Tracker {
+    return this.#repeatable ? this : new Tracker(this.config, this.#fetch, true);
   }
 
   /** Call one documented endpoint and return its decoded body. */
@@ -234,6 +261,7 @@ export class Tracker {
       ...init.headers,
     };
 
+    const repeatable = this.#repeatable || RETRY_METHODS.has(method);
     let lastError: unknown;
     for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt += 1) {
       let response: Response;
@@ -246,18 +274,14 @@ export class Tracker {
         });
       } catch (error) {
         lastError = error;
-        if (attempt < RETRY_ATTEMPTS && RETRY_METHODS.has(method)) {
+        if (attempt < RETRY_ATTEMPTS && repeatable) {
           await sleep(RETRY_BACKOFF_MS * 2 ** attempt);
           continue;
         }
         throw new TrackerApiError(0, `Failed to reach Yandex Tracker: ${message(error)}`);
       }
 
-      if (
-        RETRY_STATUSES.has(response.status) &&
-        RETRY_METHODS.has(method) &&
-        attempt < RETRY_ATTEMPTS
-      ) {
+      if (RETRY_STATUSES.has(response.status) && repeatable && attempt < RETRY_ATTEMPTS) {
         await sleep(RETRY_BACKOFF_MS * 2 ** attempt);
         continue;
       }

@@ -75,7 +75,7 @@ export type ToolDef = {
   effect: ToolEffect;
   /** Zod shape mirroring the endpoint's documented parameters. */
   input: ZodRawShape;
-  run: (tracker: Tracker, args: Record<string, never>) => Promise<unknown>;
+  run: (tracker: Tracker, args: Record<string, unknown>) => Promise<unknown>;
 };
 
 /** Declare one tool, inferring the type of `args` from `input`. */

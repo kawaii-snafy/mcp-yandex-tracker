@@ -3,12 +3,15 @@
  *
  * Resources are a *user*-facing surface (pulled into a prompt via @-mention and
  * attached as context), not something the agent reads autonomously mid-task —
- * the tools remain the agent's path to the same data. These add a natural way to
- * drop an issue snapshot or a reference dictionary into the conversation.
+ * `tracker_api` and the two dispatchers remain the agent's path to the same
+ * data. These add a natural way to drop the endpoint catalogue, an issue
+ * snapshot or a reference dictionary into the conversation.
  */
 
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/server";
 import type { Tracker } from "./client.ts";
+import { describeTool, renderCatalogue } from "./dispatch.ts";
+import { sections, toolsByName } from "./tools/index.ts";
 
 const DICTIONARIES = [
   ["queues", "tracker://queues", "/queues/", "The Yandex Tracker queue list."],
@@ -29,6 +32,58 @@ const DICTIONARIES = [
 ] as const;
 
 export function registerResources(server: McpServer, tracker: () => Tracker): void {
+  // The same catalogue `tracker_api` carries in its description, reachable by a
+  // person: `tracker://api` for all of it, `tracker://api/queues` for one
+  // section. Nothing here reaches Tracker — it is the registry, rendered.
+  server.registerResource(
+    "api",
+    "tracker://api",
+    {
+      description: "Every Yandex Tracker endpoint this server covers, by section.",
+      mimeType: "text/markdown",
+    },
+    async () => ({
+      contents: [{ uri: "tracker://api", mimeType: "text/markdown", text: renderCatalogue() }],
+    }),
+  );
+
+  server.registerResource(
+    "api-section",
+    new ResourceTemplate("tracker://api/{section}", {
+      list: async () => ({
+        resources: sections.map((section) => ({
+          uri: `tracker://api/${section.id}`,
+          name: section.id,
+          description: section.blurb,
+          mimeType: "text/markdown",
+        })),
+      }),
+    }),
+    {
+      description:
+        "One section of the endpoint catalogue (e.g. tracker://api/issues), or one endpoint by name (tracker://api/tracker_get_issue) with its argument schema.",
+      mimeType: "text/markdown",
+    },
+    async (uri, { section }) => {
+      const id = String(section);
+      const def = toolsByName.get(id);
+      if (!def && !sections.some((candidate) => candidate.id === id)) {
+        throw new Error(`No catalogue section or endpoint named "${id}". See tracker://api.`);
+      }
+      return {
+        contents: [
+          def
+            ? {
+                uri: uri.href,
+                mimeType: "application/json",
+                text: JSON.stringify(describeTool(def)),
+              }
+            : { uri: uri.href, mimeType: "text/markdown", text: renderCatalogue([id]) },
+        ],
+      };
+    },
+  );
+
   server.registerResource(
     "issue",
     new ResourceTemplate("tracker://issue/{key}", { list: undefined }),

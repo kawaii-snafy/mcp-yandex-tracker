@@ -21,7 +21,10 @@ These are load-bearing; a change that breaks one is a regression.
    official SDK.
 3. **One tool per endpoint, nothing in between.** The API's parameter names go in,
    the API's JSON comes out. No projections, no renaming, no client-side
-   pagination, no convenience tools that compose several calls.
+   pagination, no convenience tools that compose several calls. `src/dispatch.ts`
+   is the single exception and stays one: it addresses the registry by name and
+   passes arguments through, adding no semantics of its own. A new tool goes in
+   `src/tools/`, never next to the dispatchers.
 4. **No `any`, no `as`.** Let types be inferred — `tool()` derives the type of
    `run`'s arguments from `input`. The one cast in the project lives in
    `src/tool.ts` and is explained there.
@@ -49,9 +52,10 @@ A tool is one endpoint, so adding one starts by opening its page.
    writes a trailing slash), every query parameter, and every body field.
 2. **Add one entry** to the array in the `src/tools/` module that matches the
    page's section. A section with no module yet gets a new file exporting its own
-   array, wired into `src/tools/index.ts` and into `SECTIONS` in
-   `scripts/gen-tools-doc.ts`. Transcribe the parameters — same names, documented
-   types, descriptions taken from the page:
+   array, wired into `sections` in `src/tools/index.ts` — one place, which the
+   catalogue, the `tracker://api` resource and `docs/TOOLS.md` all read.
+   Transcribe the parameters — same names, documented types, descriptions taken
+   from the page:
 
    ```ts
    tool({
@@ -73,8 +77,11 @@ A tool is one endpoint, so adding one starts by opening its page.
    ```
 
    The description is always: summary line, blank line, `<METHOD> /v3/<path>`,
-   the page URL. The SDK derives the JSON Schema from `input`; `.describe()` is
-   what the agent reads, so every parameter gets one.
+   the page URL. That summary line is the endpoint's whole entry in the catalogue
+   an agent chooses from, so it has to read as a complete answer to "what does
+   this do" on its own. `z.toJSONSchema` derives the schema `tracker_api` hands
+   out from `input`; `.describe()` is what the agent reads, so every parameter
+   gets one.
 
    Conventions the whole package follows:
    - Path placeholders become camelCase fields (`<issue_ID>` → `issueId`).
@@ -87,12 +94,14 @@ A tool is one endpoint, so adding one starts by opening its page.
    - Body too open-ended to enumerate (the page says "the same format as when
      editing issues")? Take one `fields` record and spread it last.
    - **`effect` only when the method misleads.** `tool()` reads the method out of
-     the description and turns it into the MCP annotations a host uses to decide
-     whether to ask the user: GET is `read`, POST is `create`, PUT, PATCH and
-     DELETE are `modify`. Add `effect: "read" | "create" | "modify"` after the
-     description when that is wrong — a `_search` POST that only reads, a GET
-     that downloads a file onto the caller's disk, a POST like `_move` or
-     `_start` that acts on an object that already exists.
+     the description: GET is `read`, POST is `create`, PUT, PATCH and DELETE are
+     `modify`. Add `effect: "read" | "create" | "modify"` after the description
+     when that is wrong — a `_search` POST that only reads, a GET that downloads
+     a file onto the caller's disk, a POST like `_move` or `_start` that acts on
+     an object that already exists. `effect` decides which dispatcher accepts the
+     endpoint and therefore whether the host asks the user, so getting it wrong
+     either routes a destructive call through `tracker_read`'s standing
+     permission, or makes a plain read prompt for confirmation every time.
 
 3. **Regenerate the index**: `npm run docs:tools` rewrites the tables in
    [TOOLS.md](TOOLS.md) between its `<!-- tools:start -->` / `<!-- tools:end -->`
@@ -101,8 +110,10 @@ A tool is one endpoint, so adding one starts by opening its page.
    argument tables into the file either: the page is the reference.
 4. **Check it yourself.** There is no test suite, so the description and the
    `run` body are kept in step by hand — re-read them together before you commit.
-   `npm run build` proves it compiles; `node build/cli.js` under the README's
-   smoke test proves it still lists.
+   `npm run build` proves it compiles; the README's smoke test proves the server
+   still lists. A new endpoint does not show up in `tools/list` — it shows up in
+   `tracker_api`'s catalogue, so check it there and call it once through the
+   dispatcher its `effect` selects.
 
 ## Checking a change
 
@@ -112,7 +123,9 @@ There is no automated suite; two seams make manual checking cheap.
   driven with a fake — URL building, auth and org headers, boolean spelling,
   repeated query keys, non-2xx → `TrackerApiError`, `204` → `null`.
 - `buildServer(tracker)` takes the client getter, so the whole tool surface can
-  be exercised without a token.
+  be exercised without a token. To reach one endpoint directly, skip MCP and call
+  a dispatcher's `run` from `dispatchTools` with a fake `Tracker` — that covers
+  name lookup, the read/write split and argument validation in one go.
 
 For the end-to-end path, run the README's stdio smoke test against
 `node build/cli.js` — that is the artifact users get.
@@ -130,8 +143,18 @@ For the end-to-end path, run the README's stdio smoke test against
 - **More primitives.** Read-only context lives in `src/resources.ts` as
   `registerResource` calls — add more the same way. For templated prompts, use
   `registerPrompt`.
+- **Tool surface.** Three tools reach 179 endpoints, so the registry can keep
+  growing without `tools/list` growing with it: a new endpoint costs one
+  catalogue line (~70 bytes) instead of a full schema (~730 bytes on average).
+  The catalogue is the thing to watch — if it stops fitting comfortably in a
+  description, split `tracker_api` into a section index plus a per-section
+  listing before reaching for anything cleverer.
 - **Response size.** Responses are raw Tracker JSON, and issue objects are large.
   Trim them with the API's own `fields` and `expand` parameters — never by
   filtering in the server.
 - **Auth schemes.** OAuth vs IAM is decided in `authHeaders()` by `authScheme`.
   Add new schemes there, not in a tool.
+- **Retries.** `#send` repeats 429 and 5xx when a repeat cannot duplicate
+  anything — GET, HEAD, OPTIONS, DELETE, plus any client marked by
+  `idempotent()`. `invoke()` marks every `read` endpoint, which is what gets the
+  `/_search` and `/_count` POSTs covered; a `run` body never asks for it.

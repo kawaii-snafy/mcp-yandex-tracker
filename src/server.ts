@@ -3,9 +3,9 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { Tracker } from "./client.ts";
+import { dispatchTools } from "./dispatch.ts";
 import { registerResources } from "./resources.ts";
 import type { ToolEffect } from "./tool.ts";
-import { allTools } from "./tools/index.ts";
 
 export const SERVER_NAME = "mcp-yandex-tracker";
 export const SERVER_VERSION = "1.0.0";
@@ -40,16 +40,17 @@ export function getTracker(): Tracker {
 }
 
 /**
- * Build a server with every tool and resource registered.
+ * Build a server with its tools and resources registered.
  *
- * `serveStdio` calls this as a factory — the SDK pins one instance per protocol
- * era per connection — so registration has to happen here rather than as an
- * import side effect. Tests pass their own `tracker` to swap in a fake.
+ * Three tools go on the wire, not the registry's 179: `src/dispatch.ts` explains
+ * why. `serveStdio` calls this as a factory — the SDK pins one instance per
+ * protocol era per connection — so registration has to happen here rather than
+ * as an import side effect. Tests pass their own `tracker` to swap in a fake.
  */
 export function buildServer(tracker: () => Tracker = getTracker): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
-  for (const def of allTools) {
+  for (const def of dispatchTools) {
     server.registerTool(
       def.name,
       {
@@ -65,9 +66,7 @@ export function buildServer(tracker: () => Tracker = getTracker): McpServer {
         // token-lean (no duplicating structuredContent) and Cyrillic intact.
         // A thrown TrackerApiError / TrackerConfigError / ZodError is turned
         // into an `isError: true` result by the SDK, message and all.
-        content: [
-          { type: "text" as const, text: JSON.stringify(await def.run(tracker(), args as never)) },
-        ],
+        content: [{ type: "text" as const, text: JSON.stringify(await def.run(tracker(), args)) }],
       }),
     );
   }

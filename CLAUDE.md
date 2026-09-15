@@ -5,11 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents.
-It is a deliberately thin wrapper: **one tool per documented endpoint**, the API's
-own parameter names on the way in, the API's own JSON on the way out. TypeScript
-on Node, compiled by `tsc` into plain JavaScript under `build/`, published to
-npm. There is no HTTP/SSE transport — one process serves one client over
-stdin/stdout.
+It is a deliberately thin wrapper: **one tool per documented endpoint** — 179 in
+the registry — the API's own parameter names on the way in, the API's own JSON on
+the way out. TypeScript on Node, compiled by `tsc` into plain JavaScript under
+`build/`, published to npm. There is no HTTP/SSE transport — one process serves
+one client over stdin/stdout.
+
+Those 179 reach the host as **three** MCP tools. `src/dispatch.ts` explains why in
+full; the short version is that registering all 179 made `tools/list` ~55k tokens,
+two thirds of it argument schemas an agent needs one at a time.
 
 ## The rule that governs every other decision
 
@@ -74,7 +78,8 @@ as a clean tool error, not a crash. Optional: `YANDEX_TRACKER_AUTH_SCHEME`
 ```
 src/
   cli.ts       # serveStdio(() => buildServer())
-  server.ts    # buildServer(): registers every tool and resource; getTracker()
+  server.ts    # buildServer(): registers the three tools and the resources
+  dispatch.ts  # tracker_api / tracker_read / tracker_call over the registry
   client.ts    # config, errors, Tracker over fetch — the whole Tracker side
   tool.ts      # the ToolDef type and the tool() helper
   resources.ts # the read-only tracker:// surface
@@ -84,7 +89,8 @@ src/
 ```
 
 Tool modules mirror the sections of the documentation, so a doc page maps to
-exactly one code file. `src/tools/index.ts` concatenates them into `allTools`.
+exactly one code file. `src/tools/index.ts` names each module in `sections` and
+concatenates them into `allTools` / `toolsByName`.
 
 `tsconfig.json` covers `src` only — it is both the type checker and the build,
 and `rootDir`/`outDir` make `build/` mirror `src/`. Relative imports keep their
@@ -92,12 +98,19 @@ and `rootDir`/`outDir` make `build/` mirror `src/`. Relative imports keep their
 turns them into `.js` on emit. `scripts/gen-tools-doc.ts` is outside that config
 and is therefore not type-checked — it is a dev utility, run by Node directly.
 
-Four cross-cutting mechanisms to know before editing:
+Five cross-cutting mechanisms to know before editing:
 
 - **Tools are data.** Each is a `tool({ name, description, input, run })` entry.
   `input` is a Zod shape; `tool()` infers the type of `run`'s `args` from it, so
-  nothing is annotated by hand. The registry is read by `buildServer` and by
-  `scripts/gen-tools-doc.ts` alike.
+  nothing is annotated by hand. The registry is read by `src/dispatch.ts`, by
+  `src/resources.ts` and by `scripts/gen-tools-doc.ts` alike.
+- **The registry is projected, not registered.** `src/dispatch.ts` renders every
+  endpoint as one catalogue line inside `tracker_api`'s description, answers
+  `tracker_api` with `z.toJSONSchema` of the endpoint's `input`, and runs the
+  endpoint from `tracker_read` (the `read` ones) or `tracker_call` (the rest),
+  validating arguments with `z.strictObject(def.input)`. Two dispatchers rather
+  than one because MCP annotations are per tool: that is what keeps reads out of
+  the confirmation prompt. `buildServer` registers `dispatchTools` only.
 - **The description is a contract.** Summary line, blank line,
   `<METHOD> /v3/<path>`, then the documentation URL. `tool()` reads the method
   back out of it to derive the tool's `effect` — `read`, `create` or `modify` —
@@ -106,7 +119,9 @@ Four cross-cutting mechanisms to know before editing:
   whose method misleads declare `effect` themselves. Nothing checks that the
   stated endpoint is the one `run` actually calls, so keep them in step by hand.
 - **`Tracker.request(method, path, { params, body, headers })`** is the only way
-  out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on idempotent methods,
+  out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on anything a repeat
+  cannot duplicate — GET/HEAD/OPTIONS/DELETE, plus what `idempotent()` marks, the
+  view `invoke()` hands to a `read` endpoint so the `_search` POSTs back off too —
   maps a transport failure to `TrackerApiError(0, …)` and any non-2xx to
   `TrackerApiError(status, …)`, and returns the decoded body **untouched**.
   `upload()` and `download()` are the two variants the wire format forces.
@@ -120,7 +135,9 @@ Four cross-cutting mechanisms to know before editing:
   parameters.
 - **One tool per endpoint, nothing in between.** No projections, no renaming, no
   client-side pagination, no convenience tools that compose several calls. If a
-  response is too big, trim it with the API's own `fields` / `expand`.
+  response is too big, trim it with the API's own `fields` / `expand`. The three
+  dispatch tools are the single exception and stay one: they address the registry
+  by name and add no semantics. A new endpoint goes in `src/tools/`.
 - **No second HTTP path.** All Tracker access goes through `Tracker.request()`.
   Imports stay at `@modelcontextprotocol/server` + `zod` — the only two
   `dependencies`, and there is no bundler, so a third one is a third thing every
@@ -134,8 +151,11 @@ Four cross-cutting mechanisms to know before editing:
 
 Find the endpoint's page in `llms.txt`, read the `.md`, and add one `tool({...})`
 entry to the matching `src/tools/` array — description as summary, blank line,
-`<METHOD> /v3/<path>`, page URL. Then `npm run docs:tools`. See
-`docs/EXTENDING.md` for the full pattern and the naming conventions.
+`<METHOD> /v3/<path>`, page URL. Then `npm run docs:tools`. Nothing else is
+needed: the endpoint shows up in `tracker_api`'s catalogue by itself, addressed by
+name. Its summary line is the whole entry an agent chooses from, so it has to
+stand on its own. See `docs/EXTENDING.md` for the full pattern and the naming
+conventions.
 
 ## Further docs
 

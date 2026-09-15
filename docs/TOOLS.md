@@ -6,39 +6,60 @@ endpoint**, the API's own parameter names on the way in, the API's own JSON on
 the way out.
 
 That is why this page is an index rather than a copy of Yandex's argument tables.
-The documentation is the reference — every row below links to the page its tool
-was written from, and every tool repeats that link in its own description, so an
-agent holding the tool already holds the way to the spec.
+The documentation is the reference — every row below links to the page its
+endpoint was written from, and every endpoint repeats that link in its own
+description, so an agent holding it already holds the way to the spec.
 
 Naming follows the endpoint: path placeholders become camelCase arguments
 (`<issue_ID>` → `issueId`), and query and body parameters keep the API's spelling
 (`perPage`, `expand`, `markupType`).
 
-The **Effect** column is what the tool tells your host about the call, as MCP
-annotations: `read` (`readOnlyHint`) changes nothing and can be granted a
-standing permission, `create` only adds, and `modify` (`destructiveHint`) edits
-or deletes something that already exists and should be confirmed. It follows the
-HTTP method except where the method misleads — the six `_search` / `_count`
-endpoints are POSTs that read, the two attachment downloads are GETs that write
-a file to your disk, and POSTs like `tracker_move_issue`, `tracker_start_sprint`
-or the three `tracker_bulk_*` operations act on objects that are already there.
+The **Effect** column is what the endpoint tells your host about the call:
+`read` changes nothing, `create` only adds, and `modify` edits or deletes
+something that already exists. It follows the HTTP method except where the method
+misleads — the six `_search` / `_count` endpoints are POSTs that read, the two
+attachment downloads are GETs that write a file to your disk, and POSTs like
+`tracker_move_issue`, `tracker_start_sprint` or the three `tracker_bulk_*`
+operations act on objects that are already there. `read` endpoints are called
+through `tracker_read`, the other two through `tracker_call`.
 
-> Everything under [The tools](#the-tools) is generated from the tool registry:
-> `npm run docs:tools` rewrites it. Edit the tools, not the tables. This section
-> and the two below it are hand-written.
+> Everything under [The endpoints](#the-endpoints) is generated from the tool
+> registry: `npm run docs:tools` rewrites it. Edit the tools, not the tables.
+> This section and the two below it are hand-written.
 
 ## Calling convention
 
-Tools are invoked with the MCP `tools/call` method and return their payload as a
-single JSON text block (`content[0].text`) — raw Tracker JSON, nothing stripped
-and nothing reshaped. Trim large responses with the API's own `fields` and
-`expand` parameters.
+Three tools reach the 179 endpoints below. The registry holds one tool per
+endpoint, but putting all 179 in `tools/list` costs ~55k tokens of every context
+— two thirds of it argument schemas an agent needs one at a time — so the
+endpoints are exposed as data and three tools operate on them:
 
-Business failures (bad arguments, Tracker API errors, config problems) come back
-in the **same shape** with `isError: true` and a plain-text message instead of
-JSON. Required string arguments carry a minimum length of 1, so an empty value
-(`""`) is rejected by input validation — the same `isError` outcome as omitting
-the argument.
+| Tool           | Arguments                  | Returns                                                                                        |
+| -------------- | -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `tracker_api`  | `tools`: names to describe | For each: its endpoint, doc URL, which dispatcher to use, and the JSON Schema of its arguments |
+| `tracker_read` | `tool`, `args`             | The endpoint's response. Accepts `read` endpoints only                                         |
+| `tracker_call` | `tool`, `args`             | The endpoint's response. Accepts `create` and `modify` endpoints                               |
+
+`tracker_api`'s own description carries the catalogue: every endpoint name with a
+one-line summary, grouped by section, `(read)`-marked where `tracker_read` is the
+way in. So an agent sees all 179 from the start and pays for a schema only when it
+means to call something. Ask for every schema you need in one call.
+
+The split into two dispatchers preserves the MCP annotations a host acts on:
+`tracker_read` is `readOnlyHint` and can be granted a standing permission,
+`tracker_call` is `destructiveHint` and gets confirmed. One dispatcher covering
+both would force every read through a confirmation prompt.
+
+Responses come back as a single JSON text block (`content[0].text`) — raw Tracker
+JSON, nothing stripped and nothing reshaped. Trim large responses with the API's
+own `fields` and `expand` parameters.
+
+Business failures (bad arguments, an unknown endpoint name, the wrong dispatcher,
+Tracker API errors, config problems) come back in the **same shape** with
+`isError: true` and a plain-text message instead of JSON. Arguments are validated
+against the endpoint's schema, strictly: a required string carries a minimum
+length of 1, so `""` is rejected, and an argument name that is not in the schema
+is an error rather than silently dropped.
 
 An argument you leave out is absent from the request; it is never sent as `null`.
 
@@ -48,16 +69,23 @@ An argument you leave out is absent from the request; it is never sent as `null`
   "id": 7,
   "method": "tools/call",
   "params": {
-    "name": "tracker_get_issue",
-    "arguments": { "issueId": "TEST-1", "expand": "attachments" }
+    "name": "tracker_read",
+    "arguments": {
+      "tool": "tracker_get_issue",
+      "args": { "issueId": "TEST-1", "expand": "attachments" }
+    }
   }
 }
 ```
 
+The catalogue is a resource too, for a person: `tracker://api`,
+`tracker://api/issues` for one section, `tracker://api/tracker_get_issue` for one
+endpoint's schema.
+
 ## Where the wrapper is not literal
 
-Seven places where a tool cannot be a byte-for-byte mirror of its endpoint.
-There are no others.
+Seven places where an endpoint's arguments cannot be a byte-for-byte mirror of
+the API's. There are no others.
 
 | What                                                                                                                                      | Why                                                                                                                                                                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -71,15 +99,15 @@ There are no others.
 
 Every other argument is spelled exactly as the API spells it, `from` included.
 
-## The tools
+## The endpoints
 
 <!-- tools:start -->
 
-### Issues — 48 tools
+### Issues — 48 endpoints
 
 Issues, comments, checklists, attachments, worklog, links, transitions and the field dictionary.
 
-| Tool                              | Endpoint                                                                  | Effect | Documentation                                                                                                        |
+| Name                              | Endpoint                                                                  | Effect | Documentation                                                                                                        |
 | --------------------------------- | ------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `tracker_create_issue`            | `POST /v3/issues/`                                                        | create | [issues/create-issue](https://yandex.ru/support/tracker/en/api/issues/create-issue.md)                               |
 | `tracker_get_issue`               | `GET /v3/issues/{issueId}`                                                | read   | [issues/get-issue](https://yandex.ru/support/tracker/en/api/issues/get-issue.md)                                     |
@@ -130,11 +158,11 @@ Issues, comments, checklists, attachments, worklog, links, transitions and the f
 | `tracker_create_report`           | `POST /v3/entities/report/`                                               | create | [issues/create-report](https://yandex.ru/support/tracker/en/api/issues/create-report.md)                             |
 | `tracker_search_reports`          | `POST /v3/entities/report/_search`                                        | read   | [issues/search-reports](https://yandex.ru/support/tracker/en/api/issues/search-reports.md)                           |
 
-### Queues — 37 tools
+### Queues — 37 endpoints
 
 Queues, versions, tags, permissions, local fields, workflows, triggers, autoactions and components.
 
-| Tool                                 | Endpoint                                                             | Effect | Documentation                                                                                                                |
+| Name                                 | Endpoint                                                             | Effect | Documentation                                                                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | `tracker_create_queue`               | `POST /v3/queues/`                                                   | create | [queues/create-queue](https://yandex.ru/support/tracker/en/api/queues/create-queue.md)                                       |
 | `tracker_get_queues`                 | `GET /v3/queues/`                                                    | read   | [queues/get-queues](https://yandex.ru/support/tracker/en/api/queues/get-queues.md)                                           |
@@ -174,11 +202,11 @@ Queues, versions, tags, permissions, local fields, workflows, triggers, autoacti
 | `tracker_get_component_user_access`  | `GET /v3/components/{componentId}/permissions/users/{userId}`        | read   | [queues/get-component-user-access](https://yandex.ru/support/tracker/en/api/queues/get-component-user-access.md)             |
 | `tracker_get_component_group_access` | `GET /v3/components/{componentId}/permissions/groups/{groupId}`      | read   | [queues/get-component-group-access](https://yandex.ru/support/tracker/en/api/queues/get-component-group-access.md)           |
 
-### Bulk operations — 5 tools
+### Bulk operations — 5 endpoints
 
 The same edit, move or transition applied to up to 10,000 issues, and the status of the operation.
 
-| Tool                             | Endpoint                                   | Effect | Documentation                                                                                              |
+| Name                             | Endpoint                                   | Effect | Documentation                                                                                              |
 | -------------------------------- | ------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------- |
 | `tracker_bulk_update_issues`     | `POST /v3/bulkchange/_update`              | modify | [bulkchange/bulk-update-issues](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-update-issues.md) |
 | `tracker_bulk_move_issues`       | `POST /v3/bulkchange/_move`                | modify | [bulkchange/bulk-move-issues](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-issues.md)     |
@@ -186,11 +214,11 @@ The same edit, move or transition applied to up to 10,000 issues, and the status
 | `tracker_get_bulkchange`         | `GET /v3/bulkchange/{bulkchangeId}`        | read   | [bulkchange/bulk-move-info](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md)         |
 | `tracker_get_bulkchange_issues`  | `GET /v3/bulkchange/{bulkchangeId}/issues` | read   | [bulkchange/bulk-move-info](https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md)         |
 
-### Import — 6 tools
+### Import — 6 endpoints
 
 Issues, comments, links, worklog records and files brought in from another tracker with their original authors and dates.
 
-| Tool                                | Endpoint                                                             | Effect | Documentation                                                                                      |
+| Name                                | Endpoint                                                             | Effect | Documentation                                                                                      |
 | ----------------------------------- | -------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
 | `tracker_import_issue`              | `POST /v3/issues/_import`                                            | create | [import/import-ticket](https://yandex.ru/support/tracker/en/api/import/import-ticket.md)           |
 | `tracker_import_comment`            | `POST /v3/issues/{issueId}/comments/_import`                         | create | [import/import-comments](https://yandex.ru/support/tracker/en/api/import/import-comments.md)       |
@@ -199,21 +227,21 @@ Issues, comments, links, worklog records and files brought in from another track
 | `tracker_import_attachment`         | `POST /v3/issues/{issueId}/attachments/_import`                      | create | [import/import-attachments](https://yandex.ru/support/tracker/en/api/import/import-attachments.md) |
 | `tracker_import_comment_attachment` | `POST /v3/issues/{issueId}/comments/{commentId}/attachments/_import` | create | [import/import-attachments](https://yandex.ru/support/tracker/en/api/import/import-attachments.md) |
 
-### Saved filters — 3 tools
+### Saved filters — 3 endpoints
 
 The issue filters saved in the Tracker interface.
 
-| Tool                    | Endpoint                       | Effect | Documentation                                                                              |
+| Name                    | Endpoint                       | Effect | Documentation                                                                              |
 | ----------------------- | ------------------------------ | ------ | ------------------------------------------------------------------------------------------ |
 | `tracker_get_filter`    | `GET /v3/filters/{filterId}`   | read   | [filters/get-filter](https://yandex.ru/support/tracker/en/api/filters/get-filter.md)       |
 | `tracker_create_filter` | `POST /v3/filters/`            | create | [filters/create-filter](https://yandex.ru/support/tracker/en/api/filters/create-filter.md) |
 | `tracker_update_filter` | `PATCH /v3/filters/{filterId}` | modify | [filters/update-filter](https://yandex.ru/support/tracker/en/api/filters/update-filter.md) |
 
-### Queue macros — 5 tools
+### Queue macros — 5 endpoints
 
 The macros a queue offers when working on an issue.
 
-| Tool                   | Endpoint                                       | Effect | Documentation                                                              |
+| Name                   | Endpoint                                       | Effect | Documentation                                                              |
 | ---------------------- | ---------------------------------------------- | ------ | -------------------------------------------------------------------------- |
 | `tracker_get_macros`   | `GET /v3/queues/{queueId}/macros`              | read   | [get-macroses](https://yandex.ru/support/tracker/en/api/get-macroses.md)   |
 | `tracker_get_macro`    | `GET /v3/queues/{queueId}/macros/{macroId}`    | read   | [get-macros](https://yandex.ru/support/tracker/en/api/get-macros.md)       |
@@ -221,11 +249,11 @@ The macros a queue offers when working on an issue.
 | `tracker_patch_macro`  | `PATCH /v3/queues/{queueId}/macros/{macroId}`  | modify | [patch-macros](https://yandex.ru/support/tracker/en/api/patch-macros.md)   |
 | `tracker_delete_macro` | `DELETE /v3/queues/{queueId}/macros/{macroId}` | modify | [delete-macros](https://yandex.ru/support/tracker/en/api/delete-macros.md) |
 
-### Boards & sprints — 18 tools
+### Boards & sprints — 18 endpoints
 
 Boards, their columns, and sprints.
 
-| Tool                          | Endpoint                                         | Effect | Documentation                                                                                        |
+| Name                          | Endpoint                                         | Effect | Documentation                                                                                        |
 | ----------------------------- | ------------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------- |
 | `tracker_get_boards`          | `GET /v3/boards`                                 | read   | [boards/get-boards](https://yandex.ru/support/tracker/en/api/boards/get-boards.md)                   |
 | `tracker_get_boards_paginate` | `GET /v3/boards/_paginate`                       | read   | [boards/get-boards-paginate](https://yandex.ru/support/tracker/en/api/boards/get-boards-paginate.md) |
@@ -246,11 +274,11 @@ Boards, their columns, and sprints.
 | `tracker_archive_sprint`      | `POST /v3/sprints/{sprintId}/_archive`           | modify | [boards/archive-sprint](https://yandex.ru/support/tracker/en/api/boards/archive-sprint.md)           |
 | `tracker_delete_sprint`       | `DELETE /v3/sprints/{sprintId}`                  | modify | [boards/delete-sprint](https://yandex.ru/support/tracker/en/api/boards/delete-sprint.md)             |
 
-### Projects, portfolios & goals — 30 tools
+### Projects, portfolios & goals — 30 endpoints
 
 The `entities` API, with their comments, checklists, attachments, links and permissions.
 
-| Tool                                        | Endpoint                                                                           | Effect | Documentation                                                                                                                      |
+| Name                                        | Endpoint                                                                           | Effect | Documentation                                                                                                                      |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `tracker_create_entity`                     | `POST /v3/entities/{entityType}`                                                   | create | [entities/create-entity](https://yandex.ru/support/tracker/en/api/entities/create-entity.md)                                       |
 | `tracker_get_entity`                        | `GET /v3/entities/{entityType}/{entityId}`                                         | read   | [entities/get-entity](https://yandex.ru/support/tracker/en/api/entities/get-entity.md)                                             |
@@ -283,11 +311,11 @@ The `entities` API, with their comments, checklists, attachments, links and perm
 | `tracker_entity_patch_permissions`          | `PATCH /v3/entities/{entityType}/{entityId}/permissions`                           | modify | [entities/patch-access](https://yandex.ru/support/tracker/en/api/entities/patch-access.md)                                         |
 | `tracker_entity_patch_extended_permissions` | `PATCH /v3/entities/{entityType}/{entityId}/extendedPermissions`                   | modify | [entities/patch-access](https://yandex.ru/support/tracker/en/api/entities/patch-access.md)                                         |
 
-### Projects (older API) — 6 tools
+### Projects (older API) — 6 endpoints
 
 The projects API that predates `entities`; every page recommends its entity counterpart.
 
-| Tool                         | Endpoint                              | Effect | Documentation                                                                                          |
+| Name                         | Endpoint                              | Effect | Documentation                                                                                          |
 | ---------------------------- | ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
 | `tracker_get_projects`       | `GET /v3/projects`                    | read   | [projects/get-projects](https://yandex.ru/support/tracker/en/api/projects/get-projects.md)             |
 | `tracker_get_project`        | `GET /v3/projects/{projectId}`        | read   | [projects/get-project](https://yandex.ru/support/tracker/en/api/projects/get-project.md)               |
@@ -296,30 +324,30 @@ The projects API that predates `entities`; every page recommends its entity coun
 | `tracker_update_project`     | `PUT /v3/projects/{projectId}`        | modify | [projects/update-project](https://yandex.ru/support/tracker/en/api/projects/update-project.md)         |
 | `tracker_delete_project`     | `DELETE /v3/projects/{projectId}`     | modify | [projects/delete-project](https://yandex.ru/support/tracker/en/api/projects/delete-project.md)         |
 
-### Dashboards — 2 tools
+### Dashboards — 2 endpoints
 
 Dashboards and the Cycle time widget.
 
-| Tool                               | Endpoint                                              | Effect | Documentation                                                                                          |
+| Name                               | Endpoint                                              | Effect | Documentation                                                                                          |
 | ---------------------------------- | ----------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
 | `tracker_create_dashboard`         | `POST /v3/dashboards/`                                | create | [dashboards/create-dashboard](https://yandex.ru/support/tracker/en/api/dashboards/create-dashboard.md) |
 | `tracker_create_cycle_time_widget` | `POST /v3/dashboards/{dashboardId}/widgets/cycleTime` | create | [dashboards/create-widget](https://yandex.ru/support/tracker/en/api/dashboards/create-widget.md)       |
 
-### Absences — 3 tools
+### Absences — 3 endpoints
 
 Employee absences: vacations, sick leaves and duty shifts.
 
-| Tool                  | Endpoint                | Effect | Documentation                                                                    |
+| Name                  | Endpoint                | Effect | Documentation                                                                    |
 | --------------------- | ----------------------- | ------ | -------------------------------------------------------------------------------- |
 | `tracker_create_gaps` | `POST /v3/gaps`         | create | [gaps/post-gaps](https://yandex.ru/support/tracker/en/api/gaps/post-gaps.md)     |
 | `tracker_search_gaps` | `POST /v3/gaps/_search` | read   | [gaps/search-gaps](https://yandex.ru/support/tracker/en/api/gaps/search-gaps.md) |
 | `tracker_delete_gaps` | `DELETE /v3/gaps`       | modify | [gaps/delete-gaps](https://yandex.ru/support/tracker/en/api/gaps/delete-gaps.md) |
 
-### Reference dictionaries — 12 tools
+### Reference dictionaries — 12 endpoints
 
 Issue types, statuses, resolutions and priorities.
 
-| Tool                        | Endpoint                               | Effect | Documentation                                                                                  |
+| Name                        | Endpoint                               | Effect | Documentation                                                                                  |
 | --------------------------- | -------------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
 | `tracker_get_issuetypes`    | `GET /v3/issuetypes`                   | read   | [admin/get-issue-types](https://yandex.ru/support/tracker/en/api/admin/get-issue-types.md)     |
 | `tracker_create_issuetype`  | `POST /v3/issuetypes/`                 | create | [admin/create-issue-type](https://yandex.ru/support/tracker/en/api/admin/create-issue-type.md) |
@@ -334,11 +362,11 @@ Issue types, statuses, resolutions and priorities.
 | `tracker_create_priority`   | `POST /v3/priorities/`                 | create | [admin/create-priority](https://yandex.ru/support/tracker/en/api/admin/create-priority.md)     |
 | `tracker_patch_priority`    | `PATCH /v3/priorities/{priorityId}`    | modify | [admin/patch-priority](https://yandex.ru/support/tracker/en/api/admin/patch-priority.md)       |
 
-### Users — 4 tools
+### Users — 4 endpoints
 
 The organization's users and the token owner.
 
-| Tool                         | Endpoint                  | Effect | Documentation                                                                                    |
+| Name                         | Endpoint                  | Effect | Documentation                                                                                    |
 | ---------------------------- | ------------------------- | ------ | ------------------------------------------------------------------------------------------------ |
 | `tracker_get_myself`         | `GET /v3/myself`          | read   | [users/get-user-info](https://yandex.ru/support/tracker/en/api/users/get-user-info.md)           |
 | `tracker_get_users`          | `GET /v3/users`           | read   | [users/get-users](https://yandex.ru/support/tracker/en/api/users/get-users.md)                   |
