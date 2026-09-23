@@ -60,7 +60,13 @@ function effectFrom(description: string): ToolEffect {
   return (endpoint && EFFECT_BY_METHOD[endpoint.method]) ?? "modify";
 }
 
-export type ToolDef = {
+/**
+ * `Client` is what `run` is handed. Every endpoint takes a `Tracker`; the
+ * dispatchers in `src/dispatch.ts` take the getter instead, so a call that fails
+ * validation — or, like `tracker_api`, never reaches Tracker — needs no
+ * credentials to be answered.
+ */
+export type ToolDef<Client = Tracker> = {
   /** Tool name as the agent calls it, e.g. `tracker_get_issue`. */
   name: string;
   /** Short label for the host's UI, derived from the name. */
@@ -76,18 +82,18 @@ export type ToolDef = {
   effect: ToolEffect;
   /** Zod shape mirroring the endpoint's documented parameters. */
   input: ZodRawShape;
-  run: (tracker: Tracker, args: Record<string, unknown>) => Promise<unknown>;
+  run: (tracker: Client, args: Record<string, unknown>) => Promise<unknown>;
 };
 
 /** Declare one tool, inferring the type of `args` from `input`. */
-export function tool<Shape extends ZodRawShape>(def: {
+export function tool<Shape extends ZodRawShape, Client = Tracker>(def: {
   name: string;
   description: string;
   /** Only where the HTTP method would imply the wrong thing. */
   effect?: ToolEffect;
   input: Shape;
-  run: (tracker: Tracker, args: Infer<ZodObject<Shape>>) => Promise<unknown>;
-}): ToolDef {
+  run: (tracker: Client, args: Infer<ZodObject<Shape>>) => Promise<unknown>;
+}): ToolDef<Client> {
   // The one cast in the project. Outside, the registry is a homogeneous list;
   // inside each literal, `args` is fully inferred. The server validates the
   // arguments with this very shape before calling `run`, so erasing the
@@ -96,5 +102,5 @@ export function tool<Shape extends ZodRawShape>(def: {
     ...def,
     title: titleFrom(def.name),
     effect: def.effect ?? effectFrom(def.description),
-  } as unknown as ToolDef;
+  } as unknown as ToolDef<Client>;
 }

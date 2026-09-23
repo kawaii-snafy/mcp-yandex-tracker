@@ -14,7 +14,7 @@ src/
   tool.ts       # the ToolDef type and the tool() helper
   resources.ts  # the read-only tracker:// surface
   tools/
-    index.ts    # sections, allTools, toolsByName — the thirteen arrays below
+    index.ts    # sections, toolsByName — the thirteen arrays below
     issues.ts  bulkchange.ts  imports.ts  filters.ts  queues.ts  macros.ts
     boards.ts  entities.ts  projects.ts  dashboards.ts  gaps.ts  admin.ts
     users.ts
@@ -73,7 +73,12 @@ inputSchema, annotations }, handler)` — `tracker_api`, `tracker_read` and
   the SDK's precedence is `title` → `annotations.title` → `name`. This is the
   whole reason there are two dispatchers and not one: an annotation is per tool,
   so a single tool that could both read and delete would have to be flagged
-  destructive and drag a confirmation prompt onto every read.
+  destructive and drag a confirmation prompt onto every read. It is also why
+  there are two and not three: `tracker_call` carries the `create` endpoints
+  too, so a new comment is flagged destructive like a deletion. That is a
+  deliberate trade — hosts act on read versus write, rarely on the finer
+  create/modify split, and a third dispatcher would put a three-way choice in
+  front of every agent for it.
 - No `outputSchema` is declared. That keeps responses token-lean — one compact
   JSON text block, no duplicating `structuredContent`, nothing extra in every
   `tools/list`.
@@ -99,8 +104,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-issue.md`,
 ```
 
 `tool()` infers the type of `run`'s `args` from `input`, so nothing is annotated
-by hand. `src/tools/index.ts` concatenates the modules into `allTools`, keys them
-into `toolsByName`, and names each module in `sections` — the registry's table of
+by hand. `src/tools/index.ts` keys the modules into `toolsByName` and names each module in `sections` — the registry's table of
 contents. Three consumers read that: `src/dispatch.ts` renders the catalogue and
 looks endpoints up, `resources.ts` serves it under `tracker://api`, and
 `scripts/gen-tools-doc.ts` builds the index in [TOOLS.md](TOOLS.md).
@@ -133,11 +137,17 @@ So the endpoints are exposed as **data**:
   into `tracker_api`'s description, so an agent sees every endpoint from the
   first message.
 - `describeTool()` answers `tracker_api`: the endpoint line, the doc URL, which
-  dispatcher to use, and `z.toJSONSchema(z.object(def.input))` — the same schema
-  the SDK used to advertise, produced on request instead.
+  dispatcher to use, and `z.toJSONSchema(z.strictObject(def.input))` — the schema
+  the SDK used to advertise, produced on request instead, and strict because
+  `invoke()` is. An unknown name costs only its own entry: `tracker_api` answers
+  it with an `error` and still returns the schemas asked for alongside it.
 - `invoke()` is both dispatchers' body. It looks the name up in `toolsByName`,
   refuses an endpoint belonging to the other dispatcher, validates the arguments
-  with `z.strictObject(def.input)` and calls `def.run`. `strictObject` rather than
+  with `z.strictObject(def.input)` — a failure names the endpoint and comes out
+  through `z.prettifyError` — and only then builds the client and calls
+  `def.run`. The dispatchers are handed the `getTracker` getter rather than a
+  `Tracker` (`ToolDef<() => Tracker>`), so `tracker_api` and a malformed call
+  never need credentials. `strictObject` rather than
   `object` because an unknown key is a typo in an argument name, and stripping it
   silently would send a request quietly missing a value — validation moved from
   the MCP boundary to here, so it has to be the stricter kind.
@@ -157,8 +167,8 @@ agent that knows it needs four endpoints pays for one call, not four.
   read on first use, not at startup, so a missing token surfaces as a clean tool
   error instead of killing the process mid-handshake. The connection pool behind
   `fetch` is shared across calls either way.
-- `buildServer(tracker = getTracker)` takes the getter as a parameter, so tests
-  pass a fake and never touch the network.
+- The dispatchers and the resources receive `getTracker` itself, not its result,
+  and call it only on the way to Tracker.
 
 ### Resources
 
@@ -200,18 +210,14 @@ Yandex Tracker: …")`; any non-2xx becomes `TrackerApiError(status, message,
 payload)`. The error body shape is _not_ documented anywhere in the API
   reference, so the message is read best-effort from `errorMessages` / `errors`
   with a fallback to the raw body and then the HTTP status text.
-- **Retries** — 429 and 5xx are retried with exponential backoff when a repeat
-  cannot duplicate anything: GET, HEAD, OPTIONS and DELETE by method, plus
-  whatever arrives through `idempotent()`. `error-codes.md` documents that 429
+- **Retries** — 429 and 5xx are retried with exponential backoff on GET, HEAD,
+  OPTIONS and DELETE — the methods a repeat cannot duplicate anything with.
+  POST is never repeated, including the six that only read (`/_search`,
+  `/_count`): a search with `scrollId` moves its cursor, so a repeat after a lost
+  response silently skips a page, and a search that timed out is the last thing
+  to send three more times. `error-codes.md` documents that 429
   exists but specifies neither a quota nor a `Retry-After` header, so the backoff
   is ours.
-- **`idempotent()`** — the same client with every method treated as repeatable.
-  The method is all this layer knows, and by method the six POSTs that only read
-  (`/_search`, `/_count`) look unsafe — leaving a search, the call an agent makes
-  most, surfacing every 429 raw. Whether an endpoint changes anything is the
-  registry's `effect`, so `invoke()` in `src/dispatch.ts` decides and passes the
-  view down; `run` bodies are unaware. It is two fields over the same `fetch`, so
-  the connection pool is shared.
 - **`given({...})`** — drops the arguments a caller left unset, so an omitted
   optional parameter is absent from the request rather than sent as `null`.
 

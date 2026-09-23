@@ -60,9 +60,10 @@ export function registerResources(server: McpServer, tracker: () => Tracker): vo
       }),
     }),
     {
+      // No mimeType here: a section is markdown, an endpoint is JSON, and each
+      // read says which in its own contents.
       description:
         "One section of the endpoint catalogue (e.g. tracker://api/issues), or one endpoint by name (tracker://api/tracker_get_issue) with its argument schema.",
-      mimeType: "text/markdown",
     },
     async (uri, { section }) => {
       const id = String(section);

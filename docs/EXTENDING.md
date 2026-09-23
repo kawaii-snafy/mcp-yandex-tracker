@@ -122,10 +122,9 @@ There is no automated suite; two seams make manual checking cheap.
 - `new Tracker(config, fetchImpl)` takes a `fetch`, so the transport can be
   driven with a fake — URL building, auth and org headers, boolean spelling,
   repeated query keys, non-2xx → `TrackerApiError`, `204` → `null`.
-- `buildServer(tracker)` takes the client getter, so the whole tool surface can
-  be exercised without a token. To reach one endpoint directly, skip MCP and call
-  a dispatcher's `run` from `dispatchTools` with a fake `Tracker` — that covers
-  name lookup, the read/write split and argument validation in one go.
+- `npm run mock:tracker` stands in for the API host, so the whole tool surface —
+  writes included — can be driven over stdio with fake credentials. It logs every
+  request the server would have sent; see the smoke-test notes in `CLAUDE.md`.
 
 For the end-to-end path, run the README's stdio smoke test against
 `node build/cli.js` — that is the artifact users get.
@@ -135,8 +134,7 @@ For the end-to-end path, run the README's stdio smoke test against
 - **Cached client.** `getTracker()` builds one `Tracker` lazily and reuses it, so
   the connection pool behind `fetch` is shared. The environment is read once, at
   first use — which is why a missing token is a tool error rather than a crash
-  during the host's handshake. `buildServer()` takes the getter as a parameter so
-  tests can swap it.
+  during the host's handshake.
 - **Server factory.** `serveStdio` calls `buildServer` as a factory — the SDK
   pins one instance per protocol era per connection — so registration must happen
   inside it, never as an import side effect.
@@ -154,7 +152,6 @@ For the end-to-end path, run the README's stdio smoke test against
   filtering in the server.
 - **Auth schemes.** OAuth vs IAM is decided in `authHeaders()` by `authScheme`.
   Add new schemes there, not in a tool.
-- **Retries.** `#send` repeats 429 and 5xx when a repeat cannot duplicate
-  anything — GET, HEAD, OPTIONS, DELETE, plus any client marked by
-  `idempotent()`. `invoke()` marks every `read` endpoint, which is what gets the
-  `/_search` and `/_count` POSTs covered; a `run` body never asks for it.
+- **Retries.** `#send` repeats 429 and 5xx on GET, HEAD, OPTIONS and DELETE
+  only. A POST is never repeated, not even a read-only `/_search`: its scroll
+  cursor moves on every call.

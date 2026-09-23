@@ -24,8 +24,10 @@ export const API_VERSION = "v3";
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 /**
  * Methods a repeat cannot duplicate anything with. A POST is excluded because
- * repeating one usually creates a second object — but six of them only read
- * (`/_search`, `/_count`), and for those the caller says so with `idempotent()`.
+ * repeating one usually creates a second object. The six that only read
+ * (`/_search`, `/_count`) are excluded too: a search with `scrollId` moves the
+ * cursor, so a repeat after a lost response skips a page, and a search that
+ * timed out is the last thing to send again to a server that is struggling.
  */
 const RETRY_METHODS = new Set(["GET", "HEAD", "OPTIONS", "DELETE"]);
 const RETRY_ATTEMPTS = 3;
@@ -163,32 +165,10 @@ type FetchLike = typeof fetch;
 export class Tracker {
   readonly config: TrackerConfig;
   readonly #fetch: FetchLike;
-  /** Whether a repeat is safe regardless of the HTTP method. See `idempotent()`. */
-  readonly #repeatable: boolean;
 
-  constructor(
-    config: TrackerConfig = configFromEnv(),
-    fetchImpl: FetchLike = fetch,
-    repeatable = false,
-  ) {
+  constructor(config: TrackerConfig = configFromEnv(), fetchImpl: FetchLike = fetch) {
     this.config = config;
     this.#fetch = fetchImpl;
-    this.#repeatable = repeatable;
-  }
-
-  /**
-   * The same client, for a call that can be repeated whatever its method.
-   *
-   * Retrying is gated on the HTTP method because the method is all this layer
-   * knows — and that leaves the six POSTs that only read (`/_search`,
-   * `/_count`) without a retry, which is exactly where 429 shows up most: a
-   * search is the call an agent makes constantly. Whether an endpoint changes
-   * anything is the registry's `effect`, so the decision is made where that is
-   * known and arrives here as a client. Two fields and a shared `fetch` — the
-   * connection pool is the same one.
-   */
-  idempotent(): Tracker {
-    return this.#repeatable ? this : new Tracker(this.config, this.#fetch, true);
   }
 
   /** Call one documented endpoint and return its decoded body. */
@@ -261,7 +241,7 @@ export class Tracker {
       ...init.headers,
     };
 
-    const repeatable = this.#repeatable || RETRY_METHODS.has(method);
+    const repeatable = RETRY_METHODS.has(method);
     let lastError: unknown;
     for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt += 1) {
       let response: Response;

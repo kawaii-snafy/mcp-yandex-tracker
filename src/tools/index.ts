@@ -120,9 +120,7 @@ export const sections: readonly ToolSection[] = [
   },
 ];
 
-export const allTools: readonly ToolDef[] = sections.flatMap((section) => section.tools);
-
 /** The registry keyed the way `tracker_api`, `tracker_read` and `tracker_call` look it up. */
 export const toolsByName: ReadonlyMap<string, ToolDef> = new Map(
-  allTools.map((def) => [def.name, def]),
+  sections.flatMap((section) => section.tools).map((def) => [def.name, def]),
 );

@@ -45,9 +45,9 @@ export function getTracker(): Tracker {
  * Three tools go on the wire, not the registry's 179: `src/dispatch.ts` explains
  * why. `serveStdio` calls this as a factory — the SDK pins one instance per
  * protocol era per connection — so registration has to happen here rather than
- * as an import side effect. Tests pass their own `tracker` to swap in a fake.
+ * as an import side effect.
  */
-export function buildServer(tracker: () => Tracker = getTracker): McpServer {
+export function buildServer(): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
   for (const def of dispatchTools) {
@@ -66,11 +66,13 @@ export function buildServer(tracker: () => Tracker = getTracker): McpServer {
         // token-lean (no duplicating structuredContent) and Cyrillic intact.
         // A thrown TrackerApiError / TrackerConfigError / ZodError is turned
         // into an `isError: true` result by the SDK, message and all.
-        content: [{ type: "text" as const, text: JSON.stringify(await def.run(tracker(), args)) }],
+        // The dispatchers get the getter, not a client: `tracker_api` never
+        // builds one, and the other two only after the arguments check out.
+        content: [{ type: "text" as const, text: JSON.stringify(await def.run(getTracker, args)) }],
       }),
     );
   }
 
-  registerResources(server, tracker);
+  registerResources(server, getTracker);
   return server;
 }

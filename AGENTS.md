@@ -10,10 +10,9 @@
 - **Only documented REST API v3 endpoints.** Tracker is reached with `fetch`
   through `Tracker.request()` in `src/client.ts`. Do not add a second HTTP path,
   an SDK, or an abstraction layer on top of it. The MCP side stays on the
-  official `@modelcontextprotocol/server`. Retries are gated on whether a repeat
-  can duplicate anything: by method, plus `tracker.idempotent()`, which
-  `invoke()` hands to every `read` endpoint so the `/_search` POSTs back off on a
-  429 instead of failing.
+  official `@modelcontextprotocol/server`. Retries are gated on the method alone —
+  GET/HEAD/OPTIONS/DELETE. Not even the read-only `/_search` POSTs: a repeated
+  scroll request moves the cursor and skips a page.
 - **One tool per endpoint, nothing in between.** Parameter names are the API's
   own (`perPage`, `expand`, `markupType`), and the response is returned exactly
   as Tracker sent it — no reshaping, no filtering, no client-side pagination.
