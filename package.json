@@ -38,7 +38,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "docs:tools": "node scripts/gen-tools-doc.ts"
+    "docs:tools": "node scripts/gen-tools-doc.ts",
+    "mock:tracker": "node scripts/mock-tracker.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

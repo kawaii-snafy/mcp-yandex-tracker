@@ -39,6 +39,7 @@ npm run build                # the same tsc with emit: src/ -> build/, then chmo
 npm run lint                 # eslint
 npm run format               # prettier --write
 npm run docs:tools           # regenerate the docs/TOOLS.md tables
+npm run mock:tracker         # fake Tracker on :8787 for smoke tests
 
 node src/cli.ts              # run from source
 node build/cli.js            # run the shipped artifact
@@ -64,6 +65,14 @@ other request, so send it (and the `initialized` notification) first:
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
 the server shuts down on EOF, often before it has answered `tools/list`.
+
+**Never smoke-test against a real organization.** `tools/list` and `tracker_api`
+need no credentials at all. Anything that reaches Tracker goes to
+`npm run mock:tracker` instead: run the server with
+`YANDEX_TRACKER_TOKEN=fake YANDEX_TRACKER_CLOUD_ORG_ID=fake YANDEX_TRACKER_BASE_URL=http://127.0.0.1:8787`,
+and the mock logs the method, path, org header and body every call would have
+sent — so `tracker_call` is safe to drive too. `MOCK_STATUS=503` exercises the
+retries, `MOCK_DELAY` above `YANDEX_TRACKER_TIMEOUT` the timeout.
 
 ## Environment
 

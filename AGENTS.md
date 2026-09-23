@@ -45,6 +45,9 @@
 - **Node does not type-check.** It strips the types and runs, so `npm run
 typecheck` — or `npm run build`, which is the same `tsc` with emit — is what
   actually validates a change.
+- **Never smoke-test against a real organization.** Point
+  `YANDEX_TRACKER_BASE_URL` at `npm run mock:tracker` with fake credentials; it
+  logs every request the server would have sent.
 - See `docs/` for the full guide: `EXTENDING.md` (adding tools, rules, scaling),
   `ARCHITECTURE.md` (internals), `TOOLS.md` (the tool index), `INTEGRATION.md`
   (connecting hosts). `docs/TOOLS.md` is generated — `npm run docs:tools`.
