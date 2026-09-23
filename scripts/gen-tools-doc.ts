@@ -8,15 +8,15 @@
 
 import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
+import { parseEndpoint } from "../src/tool.ts";
 import { sections } from "../src/tools/index.ts";
 
 const DOC = new URL("../docs/TOOLS.md", import.meta.url);
 const START = "<!-- tools:start -->";
 const END = "<!-- tools:end -->";
 
-// Both are guaranteed by tests/tools.test.ts, which fails if a description
-// lacks them or names an endpoint the tool does not call.
-const ENDPOINT = /^(GET|POST|PUT|PATCH|DELETE) (\/v3\/\S*)$/m;
+// Nothing else checks the description contract, so this is where a tool that
+// breaks it is refused — with its name, rather than as a crash on `undefined`.
 const DOC_URL = /^(https:\/\/yandex\.ru\/support\/tracker\/en\/api\/([\w/-]+)\.md)$/m;
 
 function render(): string {
@@ -25,9 +25,16 @@ function render(): string {
     lines.push(`### ${title} — ${tools.length} endpoints\n`, `${blurb}\n`);
     lines.push("| Name | Endpoint | Effect | Documentation |", "| --- | --- | --- | --- |");
     for (const def of tools) {
-      const [, method, path] = ENDPOINT.exec(def.description)!;
-      const [, url, page] = DOC_URL.exec(def.description)!;
-      lines.push(`| \`${def.name}\` | \`${method} ${path}\` | ${def.effect} | [${page}](${url}) |`);
+      const endpoint = parseEndpoint(def.description);
+      const [, url, page] = DOC_URL.exec(def.description) ?? [];
+      if (!endpoint || !url) {
+        throw new Error(
+          `${def.name}: the description needs a "<METHOD> /v3/<path>" line and a page URL.`,
+        );
+      }
+      lines.push(
+        `| \`${def.name}\` | \`${endpoint.method} ${endpoint.path}\` | ${def.effect} | [${page}](${url}) |`,
+      );
     }
     lines.push("");
   }

@@ -3,8 +3,8 @@
  *
  * A tool is one documented Yandex Tracker v3 endpoint and nothing else: the
  * API's own parameter names go in, the API's own JSON comes out. Declaring them
- * as data rather than as registration calls means the server, the tests and the
- * `docs/TOOLS.md` generator all read the same list.
+ * as data rather than as registration calls means the dispatchers, the
+ * resources and the `docs/TOOLS.md` generator all read the same list.
  */
 
 import type { ZodObject, ZodRawShape, infer as Infer } from "zod";
@@ -55,8 +55,8 @@ function titleFrom(name: string): string {
 
 function effectFrom(description: string): ToolEffect {
   const endpoint = parseEndpoint(description);
-  // A description without a parseable endpoint line is caught by
-  // tests/tools.test.ts, not here; fall to the side that asks the user first.
+  // A description without a parseable endpoint line is refused by
+  // `npm run docs:tools`, not here; fall to the side that asks the user first.
   return (endpoint && EFFECT_BY_METHOD[endpoint.method]) ?? "modify";
 }
 
@@ -68,7 +68,8 @@ export type ToolDef = {
   /**
    * Summary line, blank line, `<METHOD> /v3/<path>`, then the URL of the page
    * the tool was written from. The endpoint line and the URL are load-bearing:
-   * the contract test and the docs generator both parse them.
+   * `tool()` derives the effect from the endpoint line, and the docs generator
+   * parses both, refusing a tool that lacks either.
    */
   description: string;
   /** Resolved for every tool: declared by the literal, or read off the method. */
