@@ -51,15 +51,15 @@ Add to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.yandex-tracker]
 command = "npx"
-args = ["-y", "mcp-yandex-tracker"]
+args = ["-y", "github:kawaii-snafy/yandex-tracker-mcp"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
 YANDEX_TRACKER_CLOUD_ORG_ID = "..."
 ```
 
-To run from a clone instead of the published package, build it (`npm run build`)
-and set `command = "node"`, `args = ["/path/to/mcp-yandex-tracker/build/cli.js"]`.
+To run from a clone instead of `npx`, build it (`npm run build`)
+and set `command = "node"`, `args = ["/path/to/yandex-tracker-mcp/build/cli.js"]`.
 
 Restart Codex after editing the config.
 
@@ -70,7 +70,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- npx -y mcp-yandex-tracker
+  -- npx -y github:kawaii-snafy/yandex-tracker-mcp
 ```
 
 Verify with `claude mcp list`, `claude mcp get yandex-tracker`, and `/mcp`
@@ -78,10 +78,12 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 
 ### Any MCP host
 
-Point the host at the published package — `npx -y mcp-yandex-tracker` — or, from
-a clone, at `node build/cli.js` after `npm run build`.
+Point the host at `npx -y github:kawaii-snafy/yandex-tracker-mcp` (append
+`#<tag>` to pin a release) or, from a clone, at `node build/cli.js` after
+`npm run build`. Keep the `github:` prefix: the package is not on npm, and the
+bare name there belongs to someone else.
 
-The published package is plain JavaScript, `build/cli.js` carries a
+npm builds `build/` itself on install, through `prepare`. It is plain JavaScript, `build/cli.js` carries a
 `#!/usr/bin/env node` shebang, and the only two dependencies are
 `@modelcontextprotocol/server` and `zod`, so a host needs nothing but Node 20 or
 newer.
@@ -113,7 +115,7 @@ MCP requires the `initialize` handshake before any other request, so pipe it
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y mcp-yandex-tracker
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y github:kawaii-snafy/yandex-tracker-mcp
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and

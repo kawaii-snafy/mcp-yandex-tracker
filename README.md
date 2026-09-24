@@ -33,6 +33,22 @@ The catalogue is also readable as a resource — `tracker://api` for all of it,
 `tracker://api/issues` for one section, `tracker://api/tracker_get_issue` for one
 endpoint's schema.
 
+## Install
+
+The package is not on npm — `npx` installs it straight from this repository:
+
+```sh
+npx -y github:kawaii-snafy/yandex-tracker-mcp          # the default branch
+npx -y github:kawaii-snafy/yandex-tracker-mcp#v1.0.0   # a tagged release
+```
+
+npm clones the repository, installs its dev dependencies and runs `prepare`,
+which compiles `build/` on the spot. The first start therefore takes a little
+longer and needs `git` on the machine.
+
+Keep the `github:` prefix. A bare `npx yandex-tracker-mcp` asks the npm registry,
+where that name belongs to another package.
+
 ## Usage with Codex
 
 Add the server to `~/.codex/config.toml`:
@@ -40,7 +56,7 @@ Add the server to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.yandex-tracker]
 command = "npx"
-args = ["-y", "mcp-yandex-tracker"]
+args = ["-y", "github:kawaii-snafy/yandex-tracker-mcp"]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
@@ -52,7 +68,7 @@ the entry point:
 
 ```toml
 command = "node"
-args = ["/path/to/mcp-yandex-tracker/build/cli.js"]
+args = ["/path/to/yandex-tracker-mcp/build/cli.js"]
 ```
 
 For a non-cloud organization, use `YANDEX_TRACKER_ORG_ID` instead of
@@ -71,7 +87,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- npx -y mcp-yandex-tracker
+  -- npx -y github:kawaii-snafy/yandex-tracker-mcp
 ```
 
 For a non-cloud organization, use `--env YANDEX_TRACKER_ORG_ID="..."` instead
@@ -112,7 +128,7 @@ notification) first:
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y mcp-yandex-tracker
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y github:kawaii-snafy/yandex-tracker-mcp
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
@@ -135,8 +151,8 @@ Deeper docs live in [`docs/`](docs/INDEX.md):
 ## Development
 
 ```sh
-git clone git@github.com:kawaii-snafy/mcp-yandex-tracker.git
-cd mcp-yandex-tracker
+git clone git@github.com:kawaii-snafy/yandex-tracker-mcp.git
+cd yandex-tracker-mcp
 npm install
 
 npm run typecheck   # tsc --noEmit — Node strips the types without checking them
@@ -150,6 +166,5 @@ node build/cli.js   # run the compiled entry point
 ```
 
 Node runs the TypeScript sources directly, so development needs Node 22.18 or
-newer. **The published package does not**: `build/` is plain JavaScript and
-`build/cli.js` carries a `#!/usr/bin/env node` shebang, so `npx` works on a
-machine with only Node 20+.
+newer. **Running it does not**: `build/` is plain JavaScript and `build/cli.js` carries
+a `#!/usr/bin/env node` shebang, so `npx` works on a machine with only Node 20+.

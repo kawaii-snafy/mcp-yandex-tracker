@@ -1,16 +1,17 @@
 {
-  "name": "mcp-yandex-tracker",
+  "name": "yandex-tracker-mcp",
   "version": "1.0.0",
   "description": "MCP stdio server for the Yandex Tracker REST API v3",
   "type": "module",
   "license": "MIT",
+  "private": true,
   "author": "snafy",
-  "homepage": "https://github.com/kawaii-snafy/mcp-yandex-tracker",
+  "homepage": "https://github.com/kawaii-snafy/yandex-tracker-mcp",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kawaii-snafy/mcp-yandex-tracker.git"
+    "url": "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git"
   },
-  "bugs": "https://github.com/kawaii-snafy/mcp-yandex-tracker/issues",
+  "bugs": "https://github.com/kawaii-snafy/yandex-tracker-mcp/issues",
   "keywords": [
     "mcp",
     "yandex-tracker",
@@ -19,7 +20,7 @@
     "stdio"
   ],
   "bin": {
-    "mcp-yandex-tracker": "build/cli.js"
+    "yandex-tracker-mcp": "build/cli.js"
   },
   "files": [
     "build",
@@ -29,11 +30,9 @@
   "engines": {
     "node": ">=20"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/cli.js', '755')\"",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

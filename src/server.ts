@@ -7,7 +7,7 @@ import { dispatchTools } from "./dispatch.ts";
 import { registerResources } from "./resources.ts";
 import type { ToolEffect } from "./tool.ts";
 
-export const SERVER_NAME = "mcp-yandex-tracker";
+export const SERVER_NAME = "yandex-tracker-mcp";
 export const SERVER_VERSION = "1.0.0";
 
 /**
