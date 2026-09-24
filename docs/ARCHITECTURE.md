@@ -136,10 +136,16 @@ agent needs one schema at a time, not all of them for the whole conversation.
 
 So the endpoints are exposed as **data**:
 
-- `renderCatalogue()` turns `sections` into one line per endpoint — name, `(read)`
-  mark, summary. 14 KB ≈ 4k tokens for all 179, and it is interpolated straight
-  into `tracker_api`'s description, so an agent sees every endpoint from the
-  first message.
+- `renderCatalogue()` turns `sections` into one line per endpoint — name, required
+  arguments, `(read)` mark, summary:
+  `tracker_get_issue(issueId, …) (read) — Get the parameters of one issue.`
+  18 KB ≈ 5k tokens for all 179, and it is interpolated straight into
+  `tracker_api`'s description, so an agent sees every endpoint from the first
+  message. The required arguments are there because nearly all of them are path
+  placeholders — the one kind of name the server makes up (`<issue_ID>` →
+  `issueId`) — and an agent that cannot see them guesses `issue_id`. The
+  optional ones keep the API's spelling and stay in the schema; `…` says there
+  are some, so `()` only ever means "takes nothing".
 - `describeTool()` answers `tracker_api`: the endpoint line, the doc URL, which
   dispatcher to use, and `z.toJSONSchema(z.strictObject(def.input))` — the schema
   the SDK used to advertise, produced on request instead, and strict because
@@ -156,7 +162,7 @@ So the endpoints are exposed as **data**:
   silently would send a request quietly missing a value — validation moved from
   the MCP boundary to here, so it has to be the stricter kind.
 
-The standing cost is ~17 KB ≈ 4.8k tokens, and the registry itself is untouched:
+The standing cost is ~22 KB ≈ 5.8k tokens, and the registry itself is untouched:
 still one tool per documented endpoint, still the same `ToolDef`, still generated
 into [TOOLS.md](TOOLS.md). What changed is only how many of them are projected
 into `tools/list`.

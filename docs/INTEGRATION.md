@@ -53,7 +53,7 @@ Add to `~/.codex/config.toml`:
 command = "npx"
 args = [
   "-y",
-  "https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz",
+  "https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.1.0/yandex-tracker-mcp.tgz",
 ]
 
 [mcp_servers.yandex-tracker.env]
@@ -73,7 +73,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz
+  -- npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.1.0/yandex-tracker-mcp.tgz
 ```
 
 Verify with `claude mcp list`, `claude mcp get yandex-tracker`, and `/mcp`
@@ -81,7 +81,7 @@ inside the session. For a non-cloud org swap in `YANDEX_TRACKER_ORG_ID`.
 
 ### Any MCP host
 
-Point the host at `npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz`
+Point the host at `npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.1.0/yandex-tracker-mcp.tgz`
 — the archive attached to a GitHub release — or, from a clone, at
 `node build/cli.js` after `npm run build`. For unreleased code,
 `npx -y github:kawaii-snafy/yandex-tracker-mcp` installs from the repository and
@@ -120,7 +120,7 @@ MCP requires the `initialize` handshake before any other request, so pipe it
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.1.0/yandex-tracker-mcp.tgz
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and

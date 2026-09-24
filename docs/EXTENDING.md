@@ -77,9 +77,9 @@ A tool is one endpoint, so adding one starts by opening its page.
    ```
 
    The description is always: summary line, blank line, `<METHOD> /v3/<path>`,
-   the page URL. That summary line is the endpoint's whole entry in the catalogue
-   an agent chooses from, so it has to read as a complete answer to "what does
-   this do" on its own. `z.toJSONSchema` derives the schema `tracker_api` hands
+   the page URL. That summary line, after the name and the required arguments,
+   is the endpoint's whole entry in the catalogue an agent chooses from, so it
+   has to read as a complete answer to "what does this do" on its own. `z.toJSONSchema` derives the schema `tracker_api` hands
    out from `input`; `.describe()` is what the agent reads, so every parameter
    gets one.
 
@@ -143,7 +143,7 @@ For the end-to-end path, run the README's stdio smoke test against
   `registerPrompt`.
 - **Tool surface.** Three tools reach 179 endpoints, so the registry can keep
   growing without `tools/list` growing with it: a new endpoint costs one
-  catalogue line (~70 bytes) instead of a full schema (~730 bytes on average).
+  catalogue line (~95 bytes) instead of a full schema (~730 bytes on average).
   The catalogue is the thing to watch — if it stops fitting comfortably in a
   description, split `tracker_api` into a section index plus a per-section
   listing before reaching for anything cleverer.

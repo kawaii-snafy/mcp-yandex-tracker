@@ -171,8 +171,8 @@ Find the endpoint's page in `llms.txt`, read the `.md`, and add one `tool({...})
 entry to the matching `src/tools/` array — description as summary, blank line,
 `<METHOD> /v3/<path>`, page URL. Then `npm run docs:tools`. Nothing else is
 needed: the endpoint shows up in `tracker_api`'s catalogue by itself, addressed by
-name. Its summary line is the whole entry an agent chooses from, so it has to
-stand on its own. See `docs/EXTENDING.md` for the full pattern and the naming
+name, with its required arguments beside it. Its summary line is the rest of the
+entry an agent chooses from, so it has to stand on its own. See `docs/EXTENDING.md` for the full pattern and the naming
 conventions.
 
 ## Further docs

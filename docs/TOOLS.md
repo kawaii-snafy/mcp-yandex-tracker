@@ -40,9 +40,11 @@ endpoints are exposed as data and three tools operate on them:
 | `tracker_read` | `tool`, `args`             | `{headers, body}` of the endpoint's response. Accepts `read` endpoints only                    |
 | `tracker_call` | `tool`, `args`             | `{headers, body}` of the endpoint's response. Accepts `create` and `modify` endpoints          |
 
-`tracker_api`'s own description carries the catalogue: every endpoint name with a
-one-line summary, grouped by section, `(read)`-marked where `tracker_read` is the
-way in. So an agent sees all 179 from the start and pays for a schema only when it
+`tracker_api`'s own description carries the catalogue: every endpoint name with
+its required arguments and a one-line summary, grouped by section,
+`(read)`-marked where `tracker_read` is the way in —
+`tracker_get_issue(issueId, …) (read) — Get the parameters of one issue.`, where
+`…` stands for optional arguments. So an agent sees all 179 from the start and pays for a schema only when it
 means to call something. Ask for every schema you need in one call.
 
 The split into two dispatchers preserves the MCP annotations a host acts on:

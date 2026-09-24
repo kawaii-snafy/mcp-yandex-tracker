@@ -6,7 +6,7 @@
  * and two thirds of that is argument schemas an agent needs one at a time. So
  * the endpoints are exposed as *data* instead: `tracker_api` names them all in
  * its description and hands out a schema on request, `tracker_read` and
- * `tracker_call` run them. Same endpoints, same arguments, same responses, ~4k
+ * `tracker_call` run them. Same endpoints, same arguments, same responses, ~6k
  * tokens standing cost.
  *
  * Two dispatchers rather than one because `effect` has to survive as MCP
@@ -35,12 +35,30 @@ function summaryOf(def: ToolDef): string {
 }
 
 /**
+ * The arguments an endpoint cannot be called without, as `(issueId, …)` — the
+ * `…` standing for optional ones, so `()` is left to the endpoints taking none.
+ *
+ * Nearly all of them are path placeholders, and those are the one kind of name
+ * this server makes up (`<issue_ID>` → `issueId`), so the documentation page
+ * cannot teach them. Out of sight, they get guessed — as `issue_id`, the way the
+ * tool names and the page spell things — and the call bounces. Read off the same
+ * JSON Schema `tracker_api` hands out, so "required" means the same in both.
+ */
+function signatureOf(def: ToolDef): string {
+  const { required = [] } = z.toJSONSchema(z.object(def.input), { io: "input" });
+  const more = Object.keys(def.input).length > required.length ? ["…"] : [];
+  return `(${[...required, ...more].join(", ")})`;
+}
+
+/**
  * Every endpoint as one line, grouped by documentation section.
  *
  * This is what replaces 179 tool definitions, so it carries exactly what
- * choosing an endpoint takes: the name, what it does, and — as a `(read)` mark —
- * which dispatcher runs it. Arguments are deliberately absent; that is the
- * question `tracker_api` answers.
+ * choosing an endpoint takes: the name and required arguments, what it does, and
+ * — as a `(read)` mark — which dispatcher runs it. The optional arguments are
+ * spelled as the API spells them and are left to `tracker_api`: listing them
+ * too would more than double what the signatures cost, for names the
+ * documentation page already teaches.
  */
 export function renderCatalogue(only?: readonly string[]): string {
   const lines: string[] = [];
@@ -49,7 +67,7 @@ export function renderCatalogue(only?: readonly string[]): string {
     lines.push(`## ${section.id} — ${section.tools.length} endpoints`, section.blurb);
     for (const def of section.tools) {
       const mark = def.effect === "read" ? " (read)" : "";
-      lines.push(`${def.name}${mark} — ${summaryOf(def)}`);
+      lines.push(`${def.name}${signatureOf(def)}${mark} — ${summaryOf(def)}`);
     }
     lines.push("");
   }
@@ -121,13 +139,13 @@ const ARGS_ARG = z
   .record(z.string(), z.unknown())
   .optional()
   .describe(
-    "Arguments for the endpoint, spelled exactly as the schema from tracker_api names them. Omit for an endpoint that takes none.",
+    'Arguments for the endpoint, spelled exactly as the catalogue and the schema from tracker_api name them — camelCase, e.g. `{"issueId": "QUEUE-1"}`. Omit for an endpoint that takes none.',
   );
 
 export const dispatchTools: readonly ToolDef<() => Tracker>[] = [
   tool({
     name: "tracker_api",
-    description: `Look up the arguments of Yandex Tracker endpoints. Every endpoint this server covers is listed below; ask this tool for the ones you intend to call — several at once — and you get their JSON Schema, HTTP method and documentation URL back.
+    description: `Look up the arguments of Yandex Tracker endpoints. Every endpoint this server covers is listed below with its required arguments in parentheses, \`…\` marking optional ones; ask this tool for the ones you intend to call — several at once — and you get their JSON Schema (optional arguments included), HTTP method and documentation URL back.
 
 Then run the endpoint: the ones marked \`(read)\` through tracker_read, all others through tracker_call.
 
