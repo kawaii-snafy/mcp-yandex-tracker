@@ -7,100 +7,151 @@ first for the map of the request lifecycle.
 
 These are load-bearing; a change that breaks one is a regression.
 
-1. **Official SDK only.** Route every Tracker capability through
-   `yandex_tracker_client` objects (`TrackerClient`, `client.issues[...]`,
-   issue collections, `.comments`, `.transitions`). Do **not** add `requests`,
-   `urllib`, raw HTTP, or ad-hoc REST wrappers.
-2. **Never write to stdout.** stdout is the JSON-RPC channel. Diagnostics go to
-   stderr (`print(..., file=sys.stderr)`). A stray `print()` corrupts the stream
-   and the host will drop the connection.
-3. **Keep dependencies minimal.** The runtime dependencies are `mcp` (the
-   official MCP SDK) and `yandex_tracker_client`. Add another only with a clear
-   reason.
-4. **Run the tests after any behavior change:**
+1. **The official documentation is the only source of truth for Yandex Tracker.**
+   Index of every page: <https://yandex.ru/support/tracker/en/llms.txt>; any page
+   is markdown by appending `.md`
+   (`https://yandex.ru/support/tracker/en/api/<section>/<page>.md`). Blogs, Stack
+   Overflow, observed production behavior and model memory are **not** sources. A
+   path, parameter or field that is not on a page from `llms.txt` does not go into
+   the code. If a capability is genuinely needed and genuinely undocumented, that
+   is a deviation: record it in [TOOLS.md](TOOLS.md) with the reason.
+2. **Only documented REST API v3 endpoints.** Every call goes through
+   `Tracker.request()` in `src/client.ts`. Do not add a second HTTP path, an HTTP
+   library, or an abstraction on top of `fetch`. The MCP side stays on the
+   official SDK.
+3. **One tool per endpoint, nothing in between.** The API's parameter names go in,
+   the API's JSON comes out. No projections, no renaming, no client-side
+   pagination, no convenience tools that compose several calls. `src/dispatch.ts`
+   is the single exception and stays one: it addresses the registry by name and
+   passes arguments through, adding no semantics of its own. A new tool goes in
+   `src/tools/`, never next to the dispatchers.
+4. **No `any`, no `as`.** Let types be inferred — `tool()` derives the type of
+   `run`'s arguments from `input`. The one cast in the project lives in
+   `src/tool.ts` and is explained there.
+5. **Never write to stdout.** stdout is the JSON-RPC channel. Diagnostics go to
+   stderr. A stray `console.log` corrupts the stream and the host drops the
+   connection.
+6. **Keep dependencies minimal.** The server imports `@modelcontextprotocol/server`
+   and `zod` and nothing else. `tsc` compiles rather than bundles, so both are
+   real `dependencies` and anything you add lands in every user's install — add
+   it only with a clear reason.
+7. **Type-check after any behavior change.** Node strips the types without
+   checking them, and there is no test suite to catch the difference:
    ```sh
-   python3 -m unittest discover -s tests
+   npm run typecheck        # or npm run build — the same tsc, with emit
    ```
+   Then drive the server over stdio once; the smoke test is in the
+   [README](../README.md#verify-locally).
 
 ## Adding a tool
 
-A tool spans two edits plus tests. Follow the existing patterns.
+A tool is one endpoint, so adding one starts by opening its page.
 
-1. **SDK client layer — add the capability.** Add a method to `YandexTrackerClient`
-   that performs the SDK work inside a closure passed to `_call_sdk`, and wrap
-   the return value in `_to_plain` so it serializes:
+1. **Find the page** in <https://yandex.ru/support/tracker/en/llms.txt> and read
+   the `.md` version. Note the method, the exact path (including whether the doc
+   writes a trailing slash), every query parameter, and every body field.
+2. **Add one entry** to the array in the `src/tools/` module that matches the
+   page's section. A section with no module yet gets a new file exporting its own
+   array, wired into `sections` in `src/tools/index.ts` — one place, which the
+   catalogue, the `tracker://api` resource and `docs/TOOLS.md` all read.
+   Transcribe the parameters — same names, documented types, descriptions taken
+   from the page:
 
-   ```python
-   def link_issues(self, issue_key: str, target_key: str, relationship: str) -> Any:
-       def link(client: Any) -> Any:
-           issue = client.issues[issue_key]
-           return issue.links.create(relationship=relationship, issue=target_key)
+   ```ts
+   tool({
+     name: "tracker_get_comments",
+     description: `Get the comments for an issue.
 
-       return _to_plain(self._call_sdk(link))
+   GET /v3/issues/{issueId}/comments
+   https://yandex.ru/support/tracker/en/api/issues/get-comments.md`,
+     input: {
+       issueId: z.string().min(1).describe("Issue ID or key."),
+       expand: z.string().optional().describe("Additional fields: attachments, html, all."),
+       perPage: z.number().int().optional().describe("Comments per page."),
+     },
+     run: (tracker, a) =>
+       tracker.request("GET", path`/issues/${a.issueId}/comments`, {
+         params: given({ expand: a.expand, perPage: a.perPage }),
+       }),
+   }),
    ```
 
-   `_call_sdk` turns SDK exceptions into `TrackerApiError`; raise `ValueError`
-   for bad arguments you detect yourself (it maps to a tool error, not a crash).
+   The description is always: summary line, blank line, `<METHOD> /v3/<path>`,
+   the page URL. That summary line is the endpoint's whole entry in the catalogue
+   an agent chooses from, so it has to read as a complete answer to "what does
+   this do" on its own. `z.toJSONSchema` derives the schema `tracker_api` hands
+   out from `input`; `.describe()` is what the agent reads, so every parameter
+   gets one.
 
-2. **MCP server layer — add the `@tool` function.** Write a typed function named
-   `tracker_<verb>_<noun>`; MCPServer derives the `inputSchema` from its
-   parameters. Required arguments have no default; optional ones default to
-   `None`/a literal. Attach parameter descriptions with
-   `Annotated[..., Field(description="…")]` and the tool description as the
-   docstring. Return the raw client payload — the `@tool` wrapper serializes it
-   to compact JSON and maps domain errors:
+   Conventions the whole package follows:
+   - Path placeholders become camelCase fields (`<issue_ID>` → `issueId`).
+   - `given({...})` drops what the caller left unset; use it for `params` and
+     `body` alike, and omit the option entirely when there is nothing to send.
+   - Required parameters carry no `.optional()`; optional ones do.
+   - When a page documents `If-Match: "<version>"`, add a trailing optional
+     `version` field and pass `headers: ifMatch(a.version)`. When it documents
+     `version` as a query parameter, it belongs in `params` instead.
+   - Body too open-ended to enumerate (the page says "the same format as when
+     editing issues")? Take one `fields` record and spread it last.
+   - **`effect` only when the method misleads.** `tool()` reads the method out of
+     the description: GET is `read`, POST is `create`, PUT, PATCH and DELETE are
+     `modify`. Add `effect: "read" | "create" | "modify"` after the description
+     when that is wrong — a `_search` POST that only reads, a GET that downloads
+     a file onto the caller's disk, a POST like `_move` or `_start` that acts on
+     an object that already exists. `effect` decides which dispatcher accepts the
+     endpoint and therefore whether the host asks the user, so getting it wrong
+     either routes a destructive call through `tracker_read`'s standing
+     permission, or makes a plain read prompt for confirmation every time.
 
-   ```python
-   @tool
-   def tracker_link_issues(
-       issue_key: str,
-       relationship: Annotated[str, Field(description="Link type, e.g. relates.")],
-       target_issue: str,
-   ) -> Any:
-       """Create a link between two Yandex Tracker issues."""
-       return get_client().link_issue(issue_key, relationship, target_issue)
-   ```
+3. **Regenerate the index**: `npm run docs:tools` rewrites the tables in
+   [TOOLS.md](TOOLS.md) between its `<!-- tools:start -->` / `<!-- tools:end -->`
+   markers and formats the result — commit whatever it changes. The preamble
+   above the marker is hand-written; leave it alone. Do not copy Yandex's
+   argument tables into the file either: the page is the reference.
+4. **Check it yourself.** There is no test suite, so the description and the
+   `run` body are kept in step by hand — re-read them together before you commit.
+   `npm run build` proves it compiles; the README's smoke test proves the server
+   still lists. A new endpoint does not show up in `tools/list` — it shows up in
+   `tracker_api`'s catalogue, so check it there and call it once through the
+   dispatcher its `effect` selects.
 
-3. **`docs/TOOLS.md` — document it.** Add the argument table so integrators see
-   it without reading code.
+## Checking a change
 
-4. **`tests/` — cover it.** Extend the fakes in `tests/test_client.py`
-   (`FakeIssue`, `FakeCollection`, …) and add a `mcp.call_tool(...)` assertion in
-   `tests/test_server.py` against the `FakeClient`.
+There is no automated suite; two seams make manual checking cheap.
 
-## Testing model
+- `new Tracker(config, fetchImpl)` takes a `fetch`, so the transport can be
+  driven with a fake — URL building, auth and org headers, boolean spelling,
+  repeated query keys, non-2xx → `TrackerApiError`, `204` → `null`.
+- `npm run mock:tracker` stands in for the API host, so the whole tool surface —
+  writes included — can be driven over stdio with fake credentials. It logs every
+  request the server would have sent; see the smoke-test notes in `CLAUDE.md`.
 
-The suite (`tests/`) runs entirely on fakes — no network, no real token.
-
-- **`test_server.py`** injects a `FakeClient` by pointing the client singleton
-  at it (`server._client = None; server._client_factory = lambda: fake`) and
-  asserts on protocol behavior via `mcp.list_tools()` / `mcp.call_tool(...)`:
-  tool listing, no output schema, tool-call results, and error mapping (domain
-  errors surface as `ToolError`).
-- **`test_client.py`** injects a fake SDK client via
-  `YandexTrackerClient(tracker_client=…)` and asserts on SDK usage, config
-  parsing, transition matching, and `_to_plain` serialization.
-
-When you add a tool, mirror both layers: a client-level test that it calls the
-right SDK method, and a server-level test that the tool name dispatches to it.
+For the end-to-end path, run the README's stdio smoke test against
+`node build/cli.js` — that is the artifact users get.
 
 ## Scaling notes
 
-- **Cached client.** `get_client()` builds one `YandexTrackerClient` lazily and
-  reuses it for the life of the process, so the SDK's `requests.Session`
-  (connection pool) is shared across tool calls. The env is read once, at first
-  use. If you ever need per-request config, swap the singleton for a keyed cache
-  rather than reaching for a different HTTP layer.
-- **More primitives.** Read-only context is already exposed as `@mcp.resource`
-  functions under `tracker://` (issue snapshot + reference dictionaries), wrapped
-  by the local `resource` helper (compact JSON + `ResourceError` mapping) — add
-  more the same way. To add templated prompts, use `@mcp.prompt()`; MCPServer
-  surfaces them as host slash commands.
-- **Transport.** MCPServer owns JSON-RPC framing, batching, and the stdio loop.
-  There is no read loop to maintain here.
-- **Serialization edge cases.** If a new SDK return type does not expose
-  `.as_dict()` and isn't a container/primitive, `_to_plain` stringifies it.
-  Prefer teaching `_to_plain` (or the method) to unwrap it into structured JSON
-  over returning an opaque string.
-- **Auth schemes.** OAuth vs IAM is decided in `_tracker_client_kwargs` by
-  `auth_scheme`. Add new schemes there, not in the tool handlers.
+- **Cached client.** `getTracker()` builds one `Tracker` lazily and reuses it, so
+  the connection pool behind `fetch` is shared. The environment is read once, at
+  first use — which is why a missing token is a tool error rather than a crash
+  during the host's handshake.
+- **Server factory.** `serveStdio` calls `buildServer` as a factory — the SDK
+  pins one instance per protocol era per connection — so registration must happen
+  inside it, never as an import side effect.
+- **More primitives.** Read-only context lives in `src/resources.ts` as
+  `registerResource` calls — add more the same way. For templated prompts, use
+  `registerPrompt`.
+- **Tool surface.** Three tools reach 179 endpoints, so the registry can keep
+  growing without `tools/list` growing with it: a new endpoint costs one
+  catalogue line (~70 bytes) instead of a full schema (~730 bytes on average).
+  The catalogue is the thing to watch — if it stops fitting comfortably in a
+  description, split `tracker_api` into a section index plus a per-section
+  listing before reaching for anything cleverer.
+- **Response size.** Responses are raw Tracker JSON, and issue objects are large.
+  Trim them with the API's own `fields` and `expand` parameters — never by
+  filtering in the server.
+- **Auth schemes.** OAuth vs IAM is decided in `authHeaders()` by `authScheme`.
+  Add new schemes there, not in a tool.
+- **Retries.** There are none, on purpose: a failed call is a tool error and the
+  agent decides whether to send it again. Do not add them back per method — a
+  lost DELETE response repeated is a false 404.

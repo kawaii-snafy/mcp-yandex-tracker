@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    // `tsc` is both the type checker and the build: `npm run build` emits
+    // build/, `npm run typecheck` runs the same config with --noEmit.
+    "target": "ES2022",
+    "lib": ["ESNext"],
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "outDir": "./build",
+    "rootDir": "./src",
+
+    // Imports carry their `.ts` extension so that Node can run the sources
+    // directly by stripping the types; `rewriteRelativeImportExtensions`
+    // turns them into `.js` on the way out.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    // TypeScript 6 no longer picks up @types/* automatically.
+    "types": ["node"],
+
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}

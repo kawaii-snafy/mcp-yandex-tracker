@@ -1,0 +1,56 @@
+{
+  "name": "yandex-tracker-mcp",
+  "version": "1.0.0",
+  "description": "MCP stdio server for the Yandex Tracker REST API v3",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "author": "snafy",
+  "homepage": "https://github.com/kawaii-snafy/yandex-tracker-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kawaii-snafy/yandex-tracker-mcp.git"
+  },
+  "bugs": "https://github.com/kawaii-snafy/yandex-tracker-mcp/issues",
+  "keywords": [
+    "mcp",
+    "yandex-tracker",
+    "llm",
+    "agents",
+    "stdio"
+  ],
+  "bin": {
+    "yandex-tracker-mcp": "build/cli.js"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/cli.js', '755')\"",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "docs:tools": "node scripts/gen-tools-doc.ts",
+    "mock:tracker": "node scripts/mock-tracker.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.2",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}

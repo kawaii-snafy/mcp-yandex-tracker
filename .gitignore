@@ -1,8 +1,8 @@
-.venv/
 .DS_Store
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
 .tmp/
 .clawpatch/
+.env
+build/
+node_modules/
+*.tsbuildinfo
+__pycache__/

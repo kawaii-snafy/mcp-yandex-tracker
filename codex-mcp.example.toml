@@ -1,7 +1,0 @@
-[mcp_servers.yandex-tracker]
-command = "uvx"
-args = ["mcp-yandex-tracker"]
-
-[mcp_servers.yandex-tracker.env]
-YANDEX_TRACKER_TOKEN = "put-token-here"
-YANDEX_TRACKER_CLOUD_ORG_ID = "put-cloud-org-id-here"
