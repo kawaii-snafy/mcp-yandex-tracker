@@ -1,7 +1,7 @@
 /** Importing from another tracker — https://yandex.ru/support/tracker/en/api/import/import-ticket.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 const issueId = z.string().min(1).describe("Key of the issue being imported into.");
@@ -210,7 +210,7 @@ Requires Administrator rights in the organization.`,
       updatedBy: updatedBy.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/comments/_import`, {
+      tracker.request("POST", path`/issues/${a.issueId}/comments/_import`, {
         body: given({
           text: a.text,
           createdAt: a.createdAt,
@@ -244,7 +244,7 @@ Requires Administrator rights in the organization.`,
       updatedBy: updatedBy.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/links/_import`, {
+      tracker.request("POST", path`/issues/${a.issueId}/links/_import`, {
         body: given({
           relationship: a.relationship,
           issue: a.issue,
@@ -282,7 +282,7 @@ Requires Administrator rights in the organization.`,
       comment: z.string().optional().describe("Comment on the record of time spent."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/worklogs/_import`, {
+      tracker.request("POST", path`/issues/${a.issueId}/worklogs/_import`, {
         body: given({
           duration: a.duration,
           start: a.start,
@@ -314,7 +314,7 @@ file, which it sends as the documented \`file_data\` part; up to 1024 Mbit.`,
       createdBy,
     },
     run: (tracker, a) =>
-      tracker.upload(`/issues/${a.issueId}/attachments/_import`, a.filePath, {
+      tracker.upload(path`/issues/${a.issueId}/attachments/_import`, a.filePath, {
         part: "file_data",
         params: { filename: a.filename, createdAt: a.createdAt, createdBy: a.createdBy },
       }),
@@ -343,7 +343,7 @@ file, which it sends as the documented \`file_data\` part; up to 1024 Mbit.`,
     },
     run: (tracker, a) =>
       tracker.upload(
-        `/issues/${a.issueId}/comments/${a.commentId}/attachments/_import`,
+        path`/issues/${a.issueId}/comments/${a.commentId}/attachments/_import`,
         a.filePath,
         {
           part: "file_data",

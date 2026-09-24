@@ -1,7 +1,7 @@
 /** Queue macros — https://yandex.ru/support/tracker/en/api/get-macroses.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 const queueId = z.string().min(1).describe("Queue ID or key. The key is case-sensitive.");
@@ -27,7 +27,7 @@ export const macroTools = [
 GET /v3/queues/{queueId}/macros
 https://yandex.ru/support/tracker/en/api/get-macroses.md`,
     input: { queueId },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/macros`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/macros`),
   }),
 
   tool({
@@ -37,7 +37,7 @@ https://yandex.ru/support/tracker/en/api/get-macroses.md`,
 GET /v3/queues/{queueId}/macros/{macroId}
 https://yandex.ru/support/tracker/en/api/get-macros.md`,
     input: { queueId, macroId },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/macros/${a.macroId}`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/macros/${a.macroId}`),
   }),
 
   tool({
@@ -53,7 +53,7 @@ https://yandex.ru/support/tracker/en/api/post-macros.md`,
       issueUpdate: issueUpdate.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/queues/${a.queueId}/macros`, {
+      tracker.request("POST", path`/queues/${a.queueId}/macros`, {
         body: given({ name: a.name, body: a.body, issueUpdate: a.issueUpdate }),
       }),
   }),
@@ -72,7 +72,7 @@ https://yandex.ru/support/tracker/en/api/patch-macros.md`,
       issueUpdate: issueUpdate.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/queues/${a.queueId}/macros/${a.macroId}`, {
+      tracker.request("PATCH", path`/queues/${a.queueId}/macros/${a.macroId}`, {
         body: given({ name: a.name, body: a.body, issueUpdate: a.issueUpdate }),
       }),
   }),
@@ -84,6 +84,6 @@ https://yandex.ru/support/tracker/en/api/patch-macros.md`,
 DELETE /v3/queues/{queueId}/macros/{macroId}
 https://yandex.ru/support/tracker/en/api/delete-macros.md`,
     input: { queueId, macroId },
-    run: (tracker, a) => tracker.request("DELETE", `/queues/${a.queueId}/macros/${a.macroId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/queues/${a.queueId}/macros/${a.macroId}`),
   }),
 ];

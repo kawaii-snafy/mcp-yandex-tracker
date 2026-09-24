@@ -1,7 +1,7 @@
 /** The older projects API — https://yandex.ru/support/tracker/en/api/projects/get-projects.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 const projectId = z.union([z.string(), z.number().int()]).describe("Project ID.");
@@ -56,7 +56,9 @@ https://yandex.ru/support/tracker/en/api/projects/get-project.md
 The page recommends tracker_get_entity as the newer way to read a project.`,
     input: { projectId, expand: expand.optional() },
     run: (tracker, a) =>
-      tracker.request("GET", `/projects/${a.projectId}`, { params: given({ expand: a.expand }) }),
+      tracker.request("GET", path`/projects/${a.projectId}`, {
+        params: given({ expand: a.expand }),
+      }),
   }),
 
   tool({
@@ -75,7 +77,7 @@ https://yandex.ru/support/tracker/en/api/projects/get-project-queues.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/projects/${a.projectId}/queues`, {
+      tracker.request("GET", path`/projects/${a.projectId}/queues`, {
         params: given({ expand: a.expand }),
       }),
   }),
@@ -135,7 +137,7 @@ should keep. The page recommends tracker_update_entity as the newer way.`,
       expand: expand.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("PUT", `/projects/${a.projectId}`, {
+      tracker.request("PUT", path`/projects/${a.projectId}`, {
         params: given({ version: a.version, expand: a.expand }),
         body: given({
           queues: a.queues,
@@ -158,6 +160,6 @@ https://yandex.ru/support/tracker/en/api/projects/delete-project.md
 
 The page recommends tracker_delete_entity as the newer way to delete a project.`,
     input: { projectId },
-    run: (tracker, a) => tracker.request("DELETE", `/projects/${a.projectId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/projects/${a.projectId}`),
   }),
 ];

@@ -8,6 +8,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { parseEndpoint } from "../src/tool.ts";
 import { sections } from "../src/tools/index.ts";
 
@@ -50,13 +51,15 @@ if (from === -1 || to === -1 || to < from) {
 
 await writeFile(DOC, `${before.slice(0, from + START.length)}\n\n${render()}\n${before.slice(to)}`);
 
-// The tables are emitted unaligned; prettier owns column widths, and the repo
-// checks formatting in CI. Format here so a regenerated file is committable and
+// The tables are emitted unaligned; prettier owns column widths, and `npm run
+// format` would realign them anyway. Format here so a regenerated file is committable and
 // so re-running this script is a genuine no-op.
 const formatted = spawnSync(
   "npx",
   ["prettier", "--write", "--log-level", "warn", "docs/TOOLS.md"],
-  { cwd: new URL("..", import.meta.url).pathname, shell: process.platform === "win32" },
+  // fileURLToPath, not `.pathname`: the latter stays percent-encoded, so a repo
+  // under a path with a space or Cyrillic in it would be a cwd that does not exist.
+  { cwd: fileURLToPath(new URL("..", import.meta.url)), shell: process.platform === "win32" },
 );
 if (formatted.status !== 0) {
   throw new Error(`prettier failed: ${formatted.stderr?.toString() ?? ""}`);

@@ -9,7 +9,7 @@
  */
 
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/server";
-import type { Tracker } from "./client.ts";
+import { path, type Tracker } from "./client.ts";
 import { describeTool, renderCatalogue } from "./dispatch.ts";
 import { sections, toolsByName } from "./tools/index.ts";
 
@@ -97,19 +97,19 @@ export function registerResources(server: McpServer, tracker: () => Tracker): vo
         {
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify(await tracker().request("GET", `/issues/${String(key)}`)),
+          text: JSON.stringify((await tracker().request("GET", path`/issues/${String(key)}`)).body),
         },
       ],
     }),
   );
 
-  for (const [name, uri, path, description] of DICTIONARIES) {
+  for (const [name, uri, endpoint, description] of DICTIONARIES) {
     server.registerResource(name, uri, { description, mimeType: "application/json" }, async () => ({
       contents: [
         {
           uri,
           mimeType: "application/json",
-          text: JSON.stringify(await tracker().request("GET", path)),
+          text: JSON.stringify((await tracker().request("GET", endpoint)).body),
         },
       ],
     }));

@@ -1,7 +1,7 @@
 /** Queues, local fields, workflows, triggers and components — https://yandex.ru/support/tracker/en/api/queues/get-queues.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const queueTools = [
@@ -85,7 +85,7 @@ organization instead.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}`, { params: given({ expand: a.expand }) }),
+      tracker.request("GET", path`/queues/${a.queueId}`, { params: given({ expand: a.expand }) }),
   }),
 
   tool({
@@ -97,7 +97,7 @@ https://yandex.ru/support/tracker/en/api/queues/delete-queue.md`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/queues/${a.queueId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/queues/${a.queueId}`),
   }),
 
   tool({
@@ -112,7 +112,7 @@ Only an organization administrator can make this request.`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("POST", `/queues/${a.queueId}/_restore`),
+    run: (tracker, a) => tracker.request("POST", path`/queues/${a.queueId}/_restore`),
   }),
 
   tool({
@@ -124,7 +124,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-fields.md`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/fields`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/fields`),
   }),
 
   tool({
@@ -136,7 +136,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-versions.md`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/versions`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/versions`),
   }),
 
   tool({
@@ -173,7 +173,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-tags.md`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/tags`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/tags`),
   }),
 
   tool({
@@ -191,7 +191,7 @@ not used in any issue of the queue.`,
       tag: z.string().min(1).describe("Tag name."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/queues/${a.queueId}/tags/_remove`, {
+      tracker.request("POST", path`/queues/${a.queueId}/tags/_remove`, {
         body: given({ tag: a.tag }),
       }),
   }),
@@ -226,7 +226,7 @@ Specify at least one of the four permission fields.`,
         .describe("Permissions to update queue settings, in the same format as `create`."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/queues/${a.queueId}/permissions`, {
+      tracker.request("PATCH", path`/queues/${a.queueId}/permissions`, {
         body: given({ create: a.create, write: a.write, read: a.read, grant: a.grant }),
       }),
   }),
@@ -242,7 +242,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-user-access.md`,
       userId: z.string().min(1).describe("Unique ID of the account or the user login."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/permissions/users/${a.userId}`),
+      tracker.request("GET", path`/queues/${a.queueId}/permissions/users/${a.userId}`),
   }),
 
   tool({
@@ -256,7 +256,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-group-access.md`,
       groupId: z.string().min(1).describe("Unique group ID in the organization."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/permissions/groups/${a.groupId}`),
+      tracker.request("GET", path`/queues/${a.queueId}/permissions/groups/${a.groupId}`),
   }),
 
   tool({
@@ -310,7 +310,7 @@ https://yandex.ru/support/tracker/en/api/queues/create-local-field.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/queues/${a.queueId}/localFields`, {
+      tracker.request("POST", path`/queues/${a.queueId}/localFields`, {
         body: given({
           name: a.name,
           id: a.id,
@@ -336,7 +336,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-local-fields.md`,
     input: {
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/localFields`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/localFields`),
   }),
 
   tool({
@@ -352,7 +352,8 @@ https://yandex.ru/support/tracker/en/api/queues/get-info-local-field.md`,
         .min(1)
         .describe("Local field key. Get it with GET /v3/queues/{queueId}/localFields."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/localFields/${a.fieldKey}`),
+    run: (tracker, a) =>
+      tracker.request("GET", path`/queues/${a.queueId}/localFields/${a.fieldKey}`),
   }),
 
   tool({
@@ -401,7 +402,7 @@ https://yandex.ru/support/tracker/en/api/queues/edit-local-field.md`,
         .describe("Whether the field is hidden completely, even when it contains a value."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/queues/${a.queueId}/localFields/${a.fieldKey}`, {
+      tracker.request("PATCH", path`/queues/${a.queueId}/localFields/${a.fieldKey}`, {
         body: given({
           name: a.name,
           category: a.category,
@@ -487,7 +488,7 @@ https://yandex.ru/support/tracker/en/api/queues/workflows/get-workflow.md`,
     input: {
       workflowId: z.string().min(1).describe("Workflow ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/workflows/${a.workflowId}`),
+    run: (tracker, a) => tracker.request("GET", path`/workflows/${a.workflowId}`),
   }),
 
   tool({
@@ -526,7 +527,7 @@ Send only the parameters you want to change.`,
         .describe("Resolution settings per issue type: `issueType` and `resolutions`."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/workflows/${a.workflowId}`, {
+      tracker.request("PATCH", path`/workflows/${a.workflowId}`, {
         params: given({ version: a.version }),
         body: given({
           name: a.name,
@@ -592,7 +593,7 @@ https://yandex.ru/support/tracker/en/api/queues/workflows/patch-workflow-action.
     run: (tracker, a) =>
       tracker.request(
         "PATCH",
-        `/workflows/${a.workflowId}/steps/${a.status}/actions/${a.actionId}`,
+        path`/workflows/${a.workflowId}/steps/${a.status}/actions/${a.actionId}`,
         {
           params: given({ version: a.version }),
           body: given({
@@ -617,7 +618,7 @@ https://yandex.ru/support/tracker/en/api/queues/workflows/delete-workflow.md`,
     input: {
       workflowId: z.string().min(1).describe("Workflow ID."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/workflows/${a.workflowId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/workflows/${a.workflowId}`),
   }),
 
   tool({
@@ -665,7 +666,7 @@ https://yandex.ru/support/tracker/en/api/queues/create-autoaction.md`,
         .describe('Period for which the auto action is active, as `{"id": <work schedule ID>}`.'),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/queues/${a.queueId}/autoactions`, {
+      tracker.request("POST", path`/queues/${a.queueId}/autoactions`, {
         body: given({
           name: a.name,
           actions: a.actions,
@@ -690,7 +691,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-autoaction.md`,
       autoactionId: z.string().min(1).describe("Auto action ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/autoactions/${a.autoactionId}`),
+      tracker.request("GET", path`/queues/${a.queueId}/autoactions/${a.autoactionId}`),
   }),
 
   tool({
@@ -707,7 +708,7 @@ Each entry carries the run \`id\` to pass to tracker_get_autoaction_run_log.`,
       autoactionId: z.string().min(1).describe("Auto action ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/autoactions/${a.autoactionId}/logs`),
+      tracker.request("GET", path`/queues/${a.queueId}/autoactions/${a.autoactionId}/logs`),
   }),
 
   tool({
@@ -722,7 +723,10 @@ https://yandex.ru/support/tracker/en/api/queues/view-autoaction-logs.md`,
       runId: z.string().min(1).describe("ID of the auto action run."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/autoactions/${a.autoactionId}/logs/${a.runId}`),
+      tracker.request(
+        "GET",
+        path`/queues/${a.queueId}/autoactions/${a.autoactionId}/logs/${a.runId}`,
+      ),
   }),
 
   tool({
@@ -748,7 +752,7 @@ https://yandex.ru/support/tracker/en/api/queues/create-trigger.md`,
       active: z.boolean().optional().describe("Trigger status: `true` active, `false` inactive."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/queues/${a.queueId}/triggers`, {
+      tracker.request("POST", path`/queues/${a.queueId}/triggers`, {
         body: given({
           name: a.name,
           actions: a.actions,
@@ -774,7 +778,7 @@ next one.`,
       id: z.number().int().optional().describe("ID of the last trigger of the previous page."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/triggers`, {
+      tracker.request("GET", path`/queues/${a.queueId}/triggers`, {
         params: given({ perPage: a.perPage, id: a.id }),
       }),
   }),
@@ -789,7 +793,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-trigger.md`,
       queueId: z.string().min(1).describe("Queue ID or key. The queue key is case-sensitive."),
       triggerId: z.string().min(1).describe("Trigger ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/queues/${a.queueId}/triggers/${a.triggerId}`),
+    run: (tracker, a) => tracker.request("GET", path`/queues/${a.queueId}/triggers/${a.triggerId}`),
   }),
 
   tool({
@@ -826,7 +830,7 @@ https://yandex.ru/support/tracker/en/api/queues/change-trigger.md`,
         .describe("ID of the trigger before which to place this trigger."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/queues/${a.queueId}/triggers/${a.triggerId}`, {
+      tracker.request("PATCH", path`/queues/${a.queueId}/triggers/${a.triggerId}`, {
         params: given({ version: a.version }),
         body: given({
           name: a.name,
@@ -863,7 +867,7 @@ https://yandex.ru/support/tracker/en/api/queues/view-trigger-logs.md`,
         .describe("End of the log filter time range in `YYYY-MM-DDThh:mm:ss.sss±hhmm` format."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/queues/${a.queueId}/triggers/${a.triggerId}/webhooks/log`, {
+      tracker.request("GET", path`/queues/${a.queueId}/triggers/${a.triggerId}/webhooks/log`, {
         params: given({ issueId: a.issueId, limit: a.limit, from: a.from, to: a.to }),
       }),
   }),
@@ -931,7 +935,7 @@ https://yandex.ru/support/tracker/en/api/queues/patch-component.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/components/${a.componentId}`, {
+      tracker.request("PATCH", path`/components/${a.componentId}`, {
         params: given({ version: a.version }),
         body: given({
           name: a.name,
@@ -953,7 +957,7 @@ https://yandex.ru/support/tracker/en/api/queues/get-component-user-access.md`,
       userId: z.string().min(1).describe("Unique ID of the account or the user login."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/components/${a.componentId}/permissions/users/${a.userId}`),
+      tracker.request("GET", path`/components/${a.componentId}/permissions/users/${a.userId}`),
   }),
 
   tool({
@@ -967,6 +971,6 @@ https://yandex.ru/support/tracker/en/api/queues/get-component-group-access.md`,
       groupId: z.string().min(1).describe("Unique group ID in the organization."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/components/${a.componentId}/permissions/groups/${a.groupId}`),
+      tracker.request("GET", path`/components/${a.componentId}/permissions/groups/${a.groupId}`),
   }),
 ];

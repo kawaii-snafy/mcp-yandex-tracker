@@ -1,7 +1,7 @@
 /** Projects, portfolios and goals — https://yandex.ru/support/tracker/en/api/entities/about-entities.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const entityTools = [
@@ -61,7 +61,7 @@ https://yandex.ru/support/tracker/en/api/entities/create-entity.md`,
         .describe("Additional entity fields to include in the response."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}`, {
+      tracker.request("POST", path`/entities/${a.entityType}`, {
         params: given({ fields: a.fields }),
         body: {
           fields: given({
@@ -110,7 +110,7 @@ https://yandex.ru/support/tracker/en/api/entities/get-entity.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}`, {
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}`, {
         params: given({ fields: a.fields, expand: a.expand }),
       }),
   }),
@@ -226,7 +226,7 @@ https://yandex.ru/support/tracker/en/api/entities/checklists/add-checklist.md`,
         metricItems: a.metricItems,
         keyResultItems: a.keyResultItems,
       });
-      return tracker.request("PATCH", `/entities/${a.entityType}/${a.entityId}`, {
+      return tracker.request("PATCH", path`/entities/${a.entityType}/${a.entityId}`, {
         params: given({ fields: a.fields, expand: a.expand }),
         body: {
           ...given({ fields: Object.keys(fields).length > 0 ? fields : undefined }),
@@ -251,7 +251,7 @@ https://yandex.ru/support/tracker/en/api/entities/delete-entity.md`,
       withBoard: z.boolean().optional().describe("Delete together with the board."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/entities/${a.entityType}/${a.entityId}`, {
+      tracker.request("DELETE", path`/entities/${a.entityType}/${a.entityId}`, {
         params: given({ withBoard: a.withBoard }),
       }),
   }),
@@ -294,7 +294,7 @@ similar issue keys.`,
         .describe("Page with search results. The default value is 1."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/_search`, {
+      tracker.request("POST", path`/entities/${a.entityType}/_search`, {
         params: given({ fields: a.fields, perPage: a.perPage, page: a.page }),
         body: given({
           input: a.input,
@@ -323,7 +323,7 @@ https://yandex.ru/support/tracker/en/api/entities/bulkchange-entities.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/bulkchange/_update`, {
+      tracker.request("POST", path`/entities/${a.entityType}/bulkchange/_update`, {
         body: given({ metaEntities: a.metaEntities, values: a.values }),
       }),
   }),
@@ -369,7 +369,7 @@ https://yandex.ru/support/tracker/en/api/entities/get-events-relative.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/events/_relative`, {
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/events/_relative`, {
         params: given({
           perPage: a.perPage,
           from: a.from,
@@ -424,7 +424,7 @@ https://yandex.ru/support/tracker/en/api/entities/comments/add-comment.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/${a.entityId}/comments`, {
+      tracker.request("POST", path`/entities/${a.entityType}/${a.entityId}/comments`, {
         params: given({
           isAddToFollowers: a.isAddToFollowers,
           notify: a.notify,
@@ -485,20 +485,24 @@ request example both address one comment, so the ID is part of the path.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`, {
-        params: given({
-          isAddToFollowers: a.isAddToFollowers,
-          notify: a.notify,
-          notifyAuthor: a.notifyAuthor,
-          expand: a.expand,
-        }),
-        body: given({
-          text: a.text,
-          attachmentIds: a.attachmentIds,
-          summonees: a.summonees,
-          maillistSummonees: a.maillistSummonees,
-        }),
-      }),
+      tracker.request(
+        "PATCH",
+        path`/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`,
+        {
+          params: given({
+            isAddToFollowers: a.isAddToFollowers,
+            notify: a.notify,
+            notifyAuthor: a.notifyAuthor,
+            expand: a.expand,
+          }),
+          body: given({
+            text: a.text,
+            attachmentIds: a.attachmentIds,
+            summonees: a.summonees,
+            maillistSummonees: a.maillistSummonees,
+          }),
+        },
+      ),
   }),
 
   tool({
@@ -521,7 +525,7 @@ https://yandex.ru/support/tracker/en/api/entities/comments/get-all-comments.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/comments`, {
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/comments`, {
         params: given({ expand: a.expand }),
       }),
   }),
@@ -567,7 +571,7 @@ https://yandex.ru/support/tracker/en/api/entities/comments/get-all-comments.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/comments/_relative`, {
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/comments/_relative`, {
         params: given({
           perPage: a.perPage,
           from: a.from,
@@ -596,9 +600,13 @@ https://yandex.ru/support/tracker/en/api/entities/comments/get-comment.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`, {
-        params: given({ expand: a.expand }),
-      }),
+      tracker.request(
+        "GET",
+        path`/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`,
+        {
+          params: given({ expand: a.expand }),
+        },
+      ),
   }),
 
   tool({
@@ -623,9 +631,13 @@ https://yandex.ru/support/tracker/en/api/entities/comments/delete-comment.md`,
         .describe("Notify the author of the changes. The default value is `false`."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`, {
-        params: given({ notify: a.notify, notifyAuthor: a.notifyAuthor }),
-      }),
+      tracker.request(
+        "DELETE",
+        path`/entities/${a.entityType}/${a.entityId}/comments/${a.commentId}`,
+        {
+          params: given({ notify: a.notify, notifyAuthor: a.notifyAuthor }),
+        },
+      ),
   }),
 
   tool({
@@ -679,7 +691,7 @@ New items are added to the end of the list.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/${a.entityId}/checklistItems`, {
+      tracker.request("POST", path`/entities/${a.entityType}/${a.entityId}/checklistItems`, {
         params: given({
           notify: a.notify,
           notifyAuthor: a.notifyAuthor,
@@ -737,7 +749,7 @@ dedicated requests instead.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/entities/${a.entityType}/${a.entityId}/checklistItems`, {
+      tracker.request("PATCH", path`/entities/${a.entityType}/${a.entityId}/checklistItems`, {
         params: given({
           notify: a.notify,
           notifyAuthor: a.notifyAuthor,
@@ -800,7 +812,7 @@ https://yandex.ru/support/tracker/en/api/entities/checklists/patch-checklist-ite
     run: (tracker, a) =>
       tracker.request(
         "PATCH",
-        `/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}`,
+        path`/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}`,
         {
           params: given({
             notify: a.notify,
@@ -860,7 +872,7 @@ https://yandex.ru/support/tracker/en/api/entities/checklists/move-checklist-item
     run: (tracker, a) =>
       tracker.request(
         "POST",
-        `/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}/_move`,
+        path`/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}/_move`,
         {
           params: given({
             notify: a.notify,
@@ -909,7 +921,7 @@ The action cannot be undone.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/entities/${a.entityType}/${a.entityId}/checklistItems`, {
+      tracker.request("DELETE", path`/entities/${a.entityType}/${a.entityId}/checklistItems`, {
         params: given({
           notify: a.notify,
           notifyAuthor: a.notifyAuthor,
@@ -958,7 +970,7 @@ The action cannot be undone.`,
     run: (tracker, a) =>
       tracker.request(
         "DELETE",
-        `/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}`,
+        path`/entities/${a.entityType}/${a.entityId}/checklistItems/${a.checklistItemId}`,
         {
           params: given({
             notify: a.notify,
@@ -984,7 +996,7 @@ https://yandex.ru/support/tracker/en/api/entities/attachments/get-all-attachment
         .describe("Entity ID. You can use the `id` or `shortId` parameter as the ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/attachments`),
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/attachments`),
   }),
 
   tool({
@@ -1001,7 +1013,7 @@ Returns the attachment's metadata, not its contents.`,
       fileId: z.string().min(1).describe("File's unique ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`),
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`),
   }),
 
   tool({
@@ -1040,14 +1052,18 @@ fileId.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`, {
-        params: given({
-          notify: a.notify,
-          notifyAuthor: a.notifyAuthor,
-          fields: a.fields,
-          expand: a.expand,
-        }),
-      }),
+      tracker.request(
+        "POST",
+        path`/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`,
+        {
+          params: given({
+            notify: a.notify,
+            notifyAuthor: a.notifyAuthor,
+            fields: a.fields,
+            expand: a.expand,
+          }),
+        },
+      ),
   }),
 
   tool({
@@ -1062,7 +1078,10 @@ https://yandex.ru/support/tracker/en/api/entities/attachments/delete-attachment.
       fileId: z.string().min(1).describe("File's unique ID."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`),
+      tracker.request(
+        "DELETE",
+        path`/entities/${a.entityType}/${a.entityId}/attachments/${a.fileId}`,
+      ),
   }),
 
   tool({
@@ -1089,7 +1108,7 @@ field with tracker_update_entity instead.`,
       entity: z.string().min(1).describe("ID of the linked entity."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/entities/${a.entityType}/${a.entityId}/links`, {
+      tracker.request("POST", path`/entities/${a.entityType}/${a.entityId}/links`, {
         body: given({ relationship: a.relationship, entity: a.entity }),
       }),
   }),
@@ -1112,7 +1131,7 @@ https://yandex.ru/support/tracker/en/api/entities/links/get-links.md`,
         .describe("Fields of the linked entities to include in the response."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/links`, {
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/links`, {
         params: given({ fields: a.fields }),
       }),
   }),
@@ -1132,7 +1151,7 @@ https://yandex.ru/support/tracker/en/api/entities/links/delete-link.md`,
       right: z.string().min(1).describe("ID of the entity whose link is deleted."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/entities/${a.entityType}/${a.entityId}/links`, {
+      tracker.request("DELETE", path`/entities/${a.entityType}/${a.entityId}/links`, {
         params: given({ right: a.right }),
       }),
   }),
@@ -1154,7 +1173,7 @@ permissionSources, the parent entity the current one inherits access from.`,
         .describe("Entity ID. You can use the `id` or `shortId` parameter as the ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/permissions`),
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/permissions`),
   }),
 
   tool({
@@ -1174,7 +1193,7 @@ settings from — next to \`acl\` as a field of its own.`,
         .describe("Entity ID. You can use the `id` or `shortId` parameter as the ID."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/entities/${a.entityType}/${a.entityId}/extendedPermissions`),
+      tracker.request("GET", path`/entities/${a.entityType}/${a.entityId}/extendedPermissions`),
   }),
 
   tool({
@@ -1207,7 +1226,7 @@ must be off before permissions can be changed.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/entities/${a.entityType}/${a.entityId}/permissions`, {
+      tracker.request("PATCH", path`/entities/${a.entityType}/${a.entityId}/permissions`, {
         body: given({ grant: a.grant, revoke: a.revoke }),
       }),
   }),
@@ -1241,7 +1260,7 @@ teamAccess parameter is ignored — disable inheritance first.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/entities/${a.entityType}/${a.entityId}/extendedPermissions`, {
+      tracker.request("PATCH", path`/entities/${a.entityType}/${a.entityId}/extendedPermissions`, {
         body: given({ permissionSources: a.permissionSources, acl: a.acl }),
       }),
   }),

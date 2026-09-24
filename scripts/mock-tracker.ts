@@ -5,7 +5,7 @@
  * YANDEX_TRACKER_BASE_URL=http://127.0.0.1:8787.
  *
  *   MOCK_PORT    listen port (8787)
- *   MOCK_STATUS  status of every reply (200) — 429 or 5xx exercises the retries
+ *   MOCK_STATUS  status of every reply (200) — 429 or 5xx exercises the error path
  *   MOCK_DELAY   milliseconds before replying (0) — above the timeout exercises it
  */
 

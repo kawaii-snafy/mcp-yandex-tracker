@@ -1,7 +1,7 @@
 /** Users — https://yandex.ru/support/tracker/en/api/users/get-users.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const userTools = [
@@ -49,7 +49,7 @@ https://yandex.ru/support/tracker/en/api/users/get-user.md`,
         .min(1)
         .describe("User login or uid. A numeric login must be passed as login:12345."),
     },
-    run: (tracker, a) => tracker.request("GET", `/users/${a.userId}`),
+    run: (tracker, a) => tracker.request("GET", path`/users/${a.userId}`),
   }),
 
   tool({

@@ -72,7 +72,7 @@ need no credentials at all. Anything that reaches Tracker goes to
 `YANDEX_TRACKER_TOKEN=fake YANDEX_TRACKER_CLOUD_ORG_ID=fake YANDEX_TRACKER_BASE_URL=http://127.0.0.1:8787`,
 and the mock logs the method, path, org header and body every call would have
 sent — so `tracker_call` is safe to drive too. `MOCK_STATUS=503` exercises the
-retries, `MOCK_DELAY` above `YANDEX_TRACKER_TIMEOUT` the timeout.
+error path, `MOCK_DELAY` above `YANDEX_TRACKER_TIMEOUT` the timeout.
 
 ## Environment
 
@@ -107,7 +107,7 @@ and `rootDir`/`outDir` make `build/` mirror `src/`. Relative imports keep their
 turns them into `.js` on emit. `scripts/gen-tools-doc.ts` is outside that config
 and is therefore not type-checked — it is a dev utility, run by Node directly.
 
-Five cross-cutting mechanisms to know before editing:
+Six cross-cutting mechanisms to know before editing:
 
 - **Tools are data.** Each is a `tool({ name, description, input, run })` entry.
   `input` is a Zod shape; `tool()` infers the type of `run`'s `args` from it, so
@@ -128,11 +128,16 @@ Five cross-cutting mechanisms to know before editing:
   whose method misleads declare `effect` themselves. Nothing checks that the
   stated endpoint is the one `run` actually calls, so keep them in step by hand.
 - **`Tracker.request(method, path, { params, body, headers })`** is the only way
-  out. It builds `{baseUrl}/v3{path}`, retries 429/5xx on GET/HEAD/OPTIONS/DELETE
-  only — never a POST, not even a read-only `_search`, whose scroll cursor a
-  repeat would move — maps a transport failure to `TrackerApiError(0, …)` and any non-2xx to
-  `TrackerApiError(status, …)`, and returns the decoded body **untouched**.
-  `upload()` and `download()` are the two variants the wire format forces.
+  out. It builds `{baseUrl}/v3{path}`, maps a transport failure to
+  `TrackerApiError(0, …)` and any non-2xx to `TrackerApiError(status, …)`, and
+  returns `{ headers, body }` — the decoded body **untouched**, plus only the
+  response headers the docs describe (`RESPONSE_HEADERS`). It never retries: a
+  repeated DELETE after a lost response is a false 404, and the agent is the one
+  that knows whether a call is safe to send again. `upload()` and `download()`
+  are the two variants the wire format forces.
+- **Paths are built with the `path` tag.** `` path`/issues/${a.issueId}` ``
+  escapes every interpolated value with `encodeURIComponent`; a bare template
+  literal lets a `#`, `?` or `/` in an agent-supplied id escape its segment.
 - **Errors are thrown, not wrapped.** `@modelcontextprotocol/server` turns a
   thrown error into an `isError: true` tool result carrying its message, so no
   handler needs a try/catch.

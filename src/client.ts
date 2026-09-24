@@ -8,7 +8,7 @@
  */
 
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -17,21 +17,33 @@ import { pipeline } from "node:stream/promises";
 export const API_VERSION = "v3";
 
 /**
- * The SDK this server used to wrap retried 10 times by default. Keep comparable
- * resilience for requests that are safe to repeat. error-codes.md documents 429
- * but specifies neither a quota nor a Retry-After header, so back off on our own.
+ * The response headers the documentation gives a meaning to, spelled as it
+ * spells them. Everything else Tracker sends — `Date`, `Server`, the transport
+ * headers — would cost every call tokens and tell an agent nothing.
+ *
+ * - common-format.md: `X-Total-Pages`, `X-Total-Count` on paginated lists.
+ * - get-changelog.md, get-comments.md, search-issues.md: `Link` to the next page.
+ * - search-issues.md: `X-Scroll-Id`, `X-Scroll-Token` of a scrollable search.
+ * - get-comment.md, get-component.md, get-version.md: `ETag`.
  */
-const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const RESPONSE_HEADERS = [
+  "X-Total-Pages",
+  "X-Total-Count",
+  "Link",
+  "X-Scroll-Id",
+  "X-Scroll-Token",
+  "ETag",
+] as const;
+
 /**
- * Methods a repeat cannot duplicate anything with. A POST is excluded because
- * repeating one usually creates a second object. The six that only read
- * (`/_search`, `/_count`) are excluded too: a search with `scrollId` moves the
- * cursor, so a repeat after a lost response skips a page, and a search that
- * timed out is the last thing to send again to a server that is struggling.
+ * What a call returns: the decoded body untouched, and next to it the headers
+ * some endpoints put the rest of their answer in — the scroll cursor, the total,
+ * the next page.
  */
-const RETRY_METHODS = new Set(["GET", "HEAD", "OPTIONS", "DELETE"]);
-const RETRY_ATTEMPTS = 3;
-const RETRY_BACKOFF_MS = 500;
+export type TrackerResponse = {
+  headers: Partial<Record<(typeof RESPONSE_HEADERS)[number], string>>;
+  body: unknown;
+};
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -84,15 +96,30 @@ export function configFromEnv(
     throw new TrackerConfigError("Set YANDEX_TRACKER_ORG_ID or YANDEX_TRACKER_CLOUD_ORG_ID.");
   }
 
-  const timeout = env.YANDEX_TRACKER_TIMEOUT;
   return {
     token,
     orgId,
     cloudOrgId,
     baseUrl: stripApiVersion(env.YANDEX_TRACKER_BASE_URL ?? DEFAULT_BASE_URL),
     authScheme: env.YANDEX_TRACKER_AUTH_SCHEME ?? DEFAULT_AUTH_SCHEME,
-    timeout: timeout === undefined ? DEFAULT_TIMEOUT_MS : Number(timeout) * 1000,
+    timeout: timeoutFrom(env.YANDEX_TRACKER_TIMEOUT),
   };
+}
+
+/**
+ * Seconds in the environment, milliseconds in the config. Anything but a
+ * positive number is refused here: `Number("30s")` is NaN and `Number("")` is 0,
+ * and either would otherwise surface as a network failure on every call.
+ */
+function timeoutFrom(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_TIMEOUT_MS;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new TrackerConfigError(
+      `YANDEX_TRACKER_TIMEOUT must be a positive number of seconds, got "${value}".`,
+    );
+  }
+  return seconds * 1000;
 }
 
 /**
@@ -105,10 +132,6 @@ function stripApiVersion(baseUrl: string): string {
     if (trimmed.endsWith(suffix)) return trimmed.slice(0, -suffix.length);
   }
   return trimmed;
-}
-
-export function apiRoot(config: TrackerConfig): string {
-  return `${stripApiVersion(config.baseUrl)}/${API_VERSION}`;
 }
 
 /**
@@ -134,6 +157,20 @@ export function authHeaders(config: TrackerConfig): Record<string, string> {
  */
 export function given<T extends Record<string, unknown>>(values: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
+/**
+ * Build a request path, escaping every interpolated value as one segment.
+ *
+ * Tools take ids and names from an agent, and a raw `#`, `?` or `/` in one of
+ * them would end the path early or address a different object: an attachment
+ * named `report #3.pdf` would ask for `…/report`. Every path with a value in it
+ * is written as path`/issues/${issueId}`.
+ */
+export function path(strings: TemplateStringsArray, ...values: Array<string | number>): string {
+  return strings.reduce((built, literal, i) =>
+    i === 0 ? literal : built + encodeURIComponent(values[i - 1]!) + literal,
+  );
 }
 
 /**
@@ -171,8 +208,12 @@ export class Tracker {
     this.#fetch = fetchImpl;
   }
 
-  /** Call one documented endpoint and return its decoded body. */
-  async request(method: HttpMethod, path: string, init: RequestInit_ = {}): Promise<unknown> {
+  /** Call one documented endpoint and return its decoded body with its headers. */
+  async request(
+    method: HttpMethod,
+    path: string,
+    init: RequestInit_ = {},
+  ): Promise<TrackerResponse> {
     const response = await this.#send(method, this.#url(path, init.params), {
       headers: init.headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -182,7 +223,7 @@ export class Tracker {
   }
 
   /** POST a local file as multipart/form-data under the documented part name. */
-  async upload(path: string, filePath: string, init: RequestInit_ = {}): Promise<unknown> {
+  async upload(path: string, filePath: string, init: RequestInit_ = {}): Promise<TrackerResponse> {
     // Validate up front so a missing or unreadable path is a clean argument
     // error rather than being mislabeled as a transport failure.
     let bytes: Buffer;
@@ -214,13 +255,20 @@ export class Tracker {
     await mkdir(destDir, { recursive: true });
     const destPath = join(destDir, name);
     if (!response.body) throw new TrackerApiError(0, "Yandex Tracker returned an empty body.");
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(destPath));
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(destPath));
+    } catch (error) {
+      // A truncated file would look like a finished one to whoever opens it next.
+      await rm(destPath, { force: true });
+      throw new TrackerApiError(0, `Download from Yandex Tracker broke off: ${message(error)}`);
+    }
     const { size } = await stat(destPath);
     return { path: destPath, name, size };
   }
 
   #url(path: string, params?: Record<string, unknown>): string {
-    const url = new URL(apiRoot(this.config) + path);
+    // configFromEnv has already dropped any version suffix from the host.
+    const url = new URL(`${this.config.baseUrl}/${API_VERSION}${path}`);
     for (const [key, value] of Object.entries(params ?? {})) {
       // A repeated key is how `createdAt=from:…&createdAt=to:…` is expressed.
       for (const item of Array.isArray(value) ? value : [value]) {
@@ -241,34 +289,26 @@ export class Tracker {
       ...init.headers,
     };
 
-    const repeatable = RETRY_METHODS.has(method);
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt += 1) {
-      let response: Response;
-      try {
-        response = await this.#fetch(url, {
-          method,
-          headers,
-          body: init.body,
-          signal: AbortSignal.timeout(this.config.timeout),
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < RETRY_ATTEMPTS && repeatable) {
-          await sleep(RETRY_BACKOFF_MS * 2 ** attempt);
-          continue;
-        }
-        throw new TrackerApiError(0, `Failed to reach Yandex Tracker: ${message(error)}`);
-      }
-
-      if (RETRY_STATUSES.has(response.status) && repeatable && attempt < RETRY_ATTEMPTS) {
-        await sleep(RETRY_BACKOFF_MS * 2 ** attempt);
-        continue;
-      }
-      if (!response.ok) throw await apiError(response);
-      return response;
+    // No retries: a repeat after a lost response can duplicate a create or turn
+    // a delete that went through into a 404, and only the agent knows which of
+    // its calls are safe to send again. A 429 or 5xx goes back to it as is.
+    //
+    // The timeout covers the wait for the response headers and nothing after:
+    // `AbortSignal.timeout` would also cut off reading the body, and a large
+    // attachment takes longer than any sensible deadline for an answer. Sending
+    // an upload is still inside it — fetch sends the body before the headers.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new Error("timed out")), this.config.timeout);
+    let response: Response;
+    try {
+      response = await this.#fetch(url, { method, headers, body: init.body, signal: abort.signal });
+    } catch (error) {
+      throw new TrackerApiError(0, `Failed to reach Yandex Tracker: ${message(error)}`);
+    } finally {
+      clearTimeout(timer);
     }
-    throw new TrackerApiError(0, `Failed to reach Yandex Tracker: ${message(lastError)}`);
+    if (!response.ok) throw await apiError(response);
+    return response;
   }
 }
 
@@ -281,13 +321,22 @@ function wireValue(value: unknown): string {
   return typeof value === "boolean" ? (value ? "true" : "false") : String(value);
 }
 
-async function decode(response: Response): Promise<unknown> {
+async function decode(response: Response): Promise<TrackerResponse> {
+  const headers: TrackerResponse["headers"] = {};
+  for (const name of RESPONSE_HEADERS) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+  return { headers, body: await decodeBody(response) };
+}
+
+async function decodeBody(response: Response): Promise<unknown> {
   // error-codes.md: 204 means the DELETE went through and carries no body.
   if (response.status === 204) return null;
   const text = await response.text();
   if (!text) return null;
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   } catch {
     return text;
   }
@@ -297,7 +346,7 @@ async function apiError(response: Response): Promise<TrackerApiError> {
   const text = await response.text().catch(() => "");
   let payload: unknown;
   try {
-    payload = text ? (JSON.parse(text) as unknown) : undefined;
+    payload = text ? JSON.parse(text) : undefined;
   } catch {
     payload = undefined;
   }
@@ -316,12 +365,15 @@ async function apiError(response: Response): Promise<TrackerApiError> {
  */
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
-  const body = payload as { errorMessages?: unknown; errors?: unknown };
-  if (Array.isArray(body.errorMessages) && body.errorMessages.length > 0) {
-    return body.errorMessages.map(String).join("; ");
+  if (
+    "errorMessages" in payload &&
+    Array.isArray(payload.errorMessages) &&
+    payload.errorMessages.length > 0
+  ) {
+    return payload.errorMessages.map(String).join("; ");
   }
-  if (typeof body.errors === "object" && body.errors !== null) {
-    const entries = Object.entries(body.errors);
+  if ("errors" in payload && typeof payload.errors === "object" && payload.errors !== null) {
+    const entries = Object.entries(payload.errors);
     if (entries.length > 0)
       return entries.map(([key, value]) => `${key}: ${String(value)}`).join("; ");
   }
@@ -330,8 +382,4 @@ function errorMessage(payload: unknown): string | undefined {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

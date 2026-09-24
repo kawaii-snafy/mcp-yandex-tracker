@@ -1,7 +1,7 @@
 /** Issues, comments, checklists, attachments, worklog and fields — https://yandex.ru/support/tracker/en/api/issues/get-issue.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const issueTools = [
@@ -243,7 +243,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-issue.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/issues/${a.issueId}`, {
+      tracker.request("GET", path`/issues/${a.issueId}`, {
         params: given({ fields: a.fields, expand: a.expand }),
       }),
   }),
@@ -406,7 +406,7 @@ https://yandex.ru/support/tracker/en/api/issues/response-fields.md.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/issues/${a.issueId}`, {
+      tracker.request("PATCH", path`/issues/${a.issueId}`, {
         params: given({ version: a.version }),
         body: {
           ...given({
@@ -502,7 +502,7 @@ queue; local field values are always reset by the move.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/_move`, {
+      tracker.request("POST", path`/issues/${a.issueId}/_move`, {
         params: given({
           queue: a.queue,
           notify: a.notify,
@@ -724,7 +724,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-changelog.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/issues/${a.issueId}/changelog`, {
+      tracker.request("GET", path`/issues/${a.issueId}/changelog`, {
         params: given({ id: a.id, perPage: a.perPage, field: a.field, type: a.type }),
       }),
   }),
@@ -746,7 +746,7 @@ https://yandex.ru/support/tracker/en/api/issues/link-issue.md`,
       issue: z.string().min(1).describe("ID or key of the linked issue."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/links`, {
+      tracker.request("POST", path`/issues/${a.issueId}/links`, {
         body: given({ relationship: a.relationship, issue: a.issue }),
       }),
   }),
@@ -760,7 +760,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-links.md`,
     input: {
       issueId: z.string().min(1).describe("ID or key of the issue."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/links`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/links`),
   }),
 
   tool({
@@ -776,7 +776,7 @@ https://yandex.ru/support/tracker/en/api/issues/delete-link-issue.md`,
         .min(1)
         .describe("ID of the link with another issue, from tracker_get_links."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/issues/${a.issueId}/links/${a.linkId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/issues/${a.issueId}/links/${a.linkId}`),
   }),
 
   tool({
@@ -788,7 +788,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-external-links.md`,
     input: {
       issueId: z.string().min(1).describe("ID or key of the issue."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/remotelinks`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/remotelinks`),
   }),
 
   tool({
@@ -810,7 +810,7 @@ https://yandex.ru/support/tracker/en/api/issues/add-external-link.md`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/remotelinks`, {
+      tracker.request("POST", path`/issues/${a.issueId}/remotelinks`, {
         params: given({ backlink: a.backlink }),
         body: given({ relationship: a.relationship, key: a.key, origin: a.origin }),
       }),
@@ -830,7 +830,7 @@ https://yandex.ru/support/tracker/en/api/issues/delete-external-link.md`,
         .describe("External link ID, from tracker_get_external_links."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/issues/${a.issueId}/remotelinks/${a.externalLinkId}`),
+      tracker.request("DELETE", path`/issues/${a.issueId}/remotelinks/${a.externalLinkId}`),
   }),
 
   tool({
@@ -842,7 +842,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-transitions.md`,
     input: {
       issueId: z.string().min(1).describe("ID or key of the issue."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/transitions`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/transitions`),
   }),
 
   tool({
@@ -867,7 +867,7 @@ updated issue.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/transitions/${a.transitionId}/_execute`, {
+      tracker.request("POST", path`/issues/${a.issueId}/transitions/${a.transitionId}/_execute`, {
         body: { ...given({ comment: a.comment }), ...(a.fields ?? {}) },
       }),
   }),
@@ -902,7 +902,7 @@ https://yandex.ru/support/tracker/en/api/issues/add-comment.md`,
         .describe("Type of text markup. Specify `md` when the comment uses YFM markup."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/comments`, {
+      tracker.request("POST", path`/issues/${a.issueId}/comments`, {
         params: given({ isAddToFollowers: a.isAddToFollowers }),
         body: given({
           text: a.text,
@@ -932,7 +932,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-comments.md`,
       id: z.string().optional().describe("Comment `id` the requested page starts after."),
     },
     run: (tracker, a) =>
-      tracker.request("GET", `/issues/${a.issueId}/comments`, {
+      tracker.request("GET", path`/issues/${a.issueId}/comments`, {
         params: given({ expand: a.expand, perPage: a.perPage, id: a.id }),
       }),
   }),
@@ -961,7 +961,7 @@ https://yandex.ru/support/tracker/en/api/issues/edit-comment.md`,
         .describe("Type of text markup. Specify `md` when the comment uses YFM markup."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/issues/${a.issueId}/comments/${a.commentId}`, {
+      tracker.request("PATCH", path`/issues/${a.issueId}/comments/${a.commentId}`, {
         body: given({
           text: a.text,
           attachmentIds: a.attachmentIds,
@@ -984,7 +984,8 @@ https://yandex.ru/support/tracker/en/api/issues/delete-comment.md`,
         .min(1)
         .describe("Unique ID of the comment, numeric (id) or string (longId)."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/issues/${a.issueId}/comments/${a.commentId}`),
+    run: (tracker, a) =>
+      tracker.request("DELETE", path`/issues/${a.issueId}/comments/${a.commentId}`),
   }),
 
   tool({
@@ -1009,7 +1010,7 @@ https://yandex.ru/support/tracker/en/api/issues/add-reaction-to-comment.md`,
     run: (tracker, a) =>
       tracker.request(
         "POST",
-        `/issues/${a.issueId}/comments/${a.commentId}/reactions/${a.reactionName}`,
+        path`/issues/${a.issueId}/comments/${a.commentId}/reactions/${a.reactionName}`,
       ),
   }),
 
@@ -1037,7 +1038,7 @@ The response is the whole issue, not the created item.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/checklistItems`, {
+      tracker.request("POST", path`/issues/${a.issueId}/checklistItems`, {
         body: given({
           text: a.text,
           checked: a.checked,
@@ -1056,7 +1057,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-checklist.md`,
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/checklistItems`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/checklistItems`),
   }),
 
   tool({
@@ -1087,7 +1088,7 @@ the path, and that is what the endpoint accepts.)`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/issues/${a.issueId}/checklistItems/${a.checklistItemId}`, {
+      tracker.request("PATCH", path`/issues/${a.issueId}/checklistItems/${a.checklistItemId}`, {
         body: given({
           text: a.text,
           checked: a.checked,
@@ -1106,7 +1107,7 @@ https://yandex.ru/support/tracker/en/api/issues/delete-checklist.md`,
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/issues/${a.issueId}/checklistItems`),
+    run: (tracker, a) => tracker.request("DELETE", path`/issues/${a.issueId}/checklistItems`),
   }),
 
   tool({
@@ -1120,7 +1121,7 @@ https://yandex.ru/support/tracker/en/api/issues/delete-checklist-item.md`,
       checklistItemId: z.string().min(1).describe("Checklist item ID, from tracker_get_checklist."),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/issues/${a.issueId}/checklistItems/${a.checklistItemId}`),
+      tracker.request("DELETE", path`/issues/${a.issueId}/checklistItems/${a.checklistItemId}`),
   }),
 
   tool({
@@ -1132,7 +1133,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-attachments-list.md`,
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/attachments`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/attachments`),
   }),
 
   tool({
@@ -1159,7 +1160,7 @@ Writes the file to \`destDir\` and returns {"path", "name", "size"}.`,
     },
     run: (tracker, a) =>
       tracker.download(
-        `/issues/${a.issueId}/attachments/${a.fileId}/${a.fileName}`,
+        path`/issues/${a.issueId}/attachments/${a.fileId}/${a.fileName}`,
         a.destDir,
         a.saveAs ?? a.fileName,
       ),
@@ -1188,7 +1189,7 @@ Writes the thumbnail to \`destDir\` and returns {"path", "name", "size"}.`,
     },
     run: (tracker, a) =>
       tracker.download(
-        `/issues/${a.issueId}/thumbnails/${a.fileId}`,
+        path`/issues/${a.issueId}/thumbnails/${a.fileId}`,
         a.destDir,
         a.saveAs ?? a.fileId,
       ),
@@ -1216,7 +1217,7 @@ The file appears on the issue's Attachments tab.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.upload(`/issues/${a.issueId}/attachments/`, a.filePath, {
+      tracker.upload(path`/issues/${a.issueId}/attachments/`, a.filePath, {
         params: given({ filename: a.filename }),
       }),
   }),
@@ -1256,7 +1257,8 @@ https://yandex.ru/support/tracker/en/api/issues/delete-attachment.md`,
       issueId: z.string().min(1).describe("Issue ID or key."),
       fileId: z.string().min(1).describe("Unique file ID, from tracker_get_attachments."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/issues/${a.issueId}/attachments/${a.fileId}/`),
+    run: (tracker, a) =>
+      tracker.request("DELETE", path`/issues/${a.issueId}/attachments/${a.fileId}/`),
   }),
 
   tool({
@@ -1288,7 +1290,7 @@ so a submitted \`P5D\` comes back as \`P1W\`.`,
         .describe("Text of the comment on the record, saved to the Report on time spent."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/issues/${a.issueId}/worklog`, {
+      tracker.request("POST", path`/issues/${a.issueId}/worklog`, {
         body: given({ start: a.start, duration: a.duration, comment: a.comment }),
       }),
   }),
@@ -1302,7 +1304,7 @@ https://yandex.ru/support/tracker/en/api/issues/issue-worklog.md`,
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
     },
-    run: (tracker, a) => tracker.request("GET", `/issues/${a.issueId}/worklog`),
+    run: (tracker, a) => tracker.request("GET", path`/issues/${a.issueId}/worklog`),
   }),
 
   tool({
@@ -1329,7 +1331,7 @@ so a submitted \`P5D\` comes back as \`P1W\`.`,
         .describe("Text of the comment on the record, saved to the Report on time spent."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/issues/${a.issueId}/worklog/${a.recordId}`, {
+      tracker.request("PATCH", path`/issues/${a.issueId}/worklog/${a.recordId}`, {
         body: given({ duration: a.duration, comment: a.comment }),
       }),
   }),
@@ -1344,7 +1346,8 @@ https://yandex.ru/support/tracker/en/api/issues/delete-worklog.md`,
       issueId: z.string().min(1).describe("Issue ID or key."),
       recordId: z.string().min(1).describe("ID of the record of time spent."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/issues/${a.issueId}/worklog/${a.recordId}`),
+    run: (tracker, a) =>
+      tracker.request("DELETE", path`/issues/${a.issueId}/worklog/${a.recordId}`),
   }),
 
   tool({
@@ -1491,7 +1494,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-issue-fields.md`,
     input: {
       fieldId: z.string().min(1).describe("Issue field ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/fields/${a.fieldId}`),
+    run: (tracker, a) => tracker.request("GET", path`/fields/${a.fieldId}`),
   }),
 
   tool({
@@ -1546,7 +1549,7 @@ values — and the arguments below are the union of what they document.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/fields/${a.fieldId}`, {
+      tracker.request("PATCH", path`/fields/${a.fieldId}`, {
         params: given({ version: a.version }),
         body: given({
           name: a.name,
@@ -1610,7 +1613,7 @@ https://yandex.ru/support/tracker/en/api/issues/patch-issue-field-category.md`,
         .describe("Category version. Changes apply only to the current version."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/fields/categories/${a.categoryId}`, {
+      tracker.request("PATCH", path`/fields/categories/${a.categoryId}`, {
         params: given({ version: a.version }),
         body: given({ name: a.name, order: a.order, description: a.description }),
       }),

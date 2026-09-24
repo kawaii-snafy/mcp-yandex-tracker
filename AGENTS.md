@@ -10,12 +10,13 @@
 - **Only documented REST API v3 endpoints.** Tracker is reached with `fetch`
   through `Tracker.request()` in `src/client.ts`. Do not add a second HTTP path,
   an SDK, or an abstraction layer on top of it. The MCP side stays on the
-  official `@modelcontextprotocol/server`. Retries are gated on the method alone —
-  GET/HEAD/OPTIONS/DELETE. Not even the read-only `/_search` POSTs: a repeated
-  scroll request moves the cursor and skips a page.
+  official `@modelcontextprotocol/server`. There are no retries: a failed call
+  goes back to the agent, which knows whether repeating it is safe. Every path
+  with a value in it is built with the `path` tag, which escapes each value.
 - **One tool per endpoint, nothing in between.** Parameter names are the API's
-  own (`perPage`, `expand`, `markupType`), and the response is returned exactly
-  as Tracker sent it — no reshaping, no filtering, no client-side pagination.
+  own (`perPage`, `expand`, `markupType`), and the response body is returned exactly
+  as Tracker sent it — no reshaping, no filtering, no client-side pagination —
+  inside `{ headers, body }`, where `headers` holds only the documented ones.
 - Tools are **data**: each is a `tool({ name, description, input, run })` entry in
   the array its `src/tools/<section>.ts` exports. `src/tools/index.ts` names every
   module in `sections` — one place, read by the catalogue, the `tracker://api`

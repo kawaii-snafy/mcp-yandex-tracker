@@ -1,7 +1,7 @@
 /** Saved issue filters — https://yandex.ru/support/tracker/en/api/filters/get-filter.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 const filter = z
@@ -44,7 +44,7 @@ https://yandex.ru/support/tracker/en/api/filters/get-filter.md`,
     input: {
       filterId: z.union([z.string(), z.number().int()]).describe("Filter ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/filters/${a.filterId}`),
+    run: (tracker, a) => tracker.request("GET", path`/filters/${a.filterId}`),
   }),
 
   tool({
@@ -96,7 +96,7 @@ should keep, not only the new ones.`,
       folder: folder.optional(),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/filters/${a.filterId}`, {
+      tracker.request("PATCH", path`/filters/${a.filterId}`, {
         body: given({
           name: a.name,
           filter: a.filter,

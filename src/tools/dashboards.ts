@@ -1,7 +1,7 @@
 /** Dashboards and their widgets — https://yandex.ru/support/tracker/en/api/dashboards/create-dashboard.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const dashboardTools = [
@@ -104,7 +104,7 @@ https://yandex.ru/support/tracker/en/api/dashboards/create-widget.md`,
       autoUpdatable: z.boolean().optional().describe("Refresh the chart automatically."),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/dashboards/${a.dashboardId}/widgets/cycleTime`, {
+      tracker.request("POST", path`/dashboards/${a.dashboardId}/widgets/cycleTime`, {
         body: given({
           description: a.description,
           query: a.query,

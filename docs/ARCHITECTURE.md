@@ -189,19 +189,27 @@ own.
 ## HTTP client layer
 
 `client.ts` is the entire Tracker side, and it is deliberately small. There is no
-HTTP library: `fetch`, `FormData`, `File` and `AbortSignal.timeout` are built
+HTTP library: `fetch`, `FormData`, `File` and `AbortController` are built
 into Node 20+.
 
 - **Config** — `configFromEnv()` reads the environment and validates that a token
-  and one org id are present. `apiRoot()` always ends in `/v3`: the version
-  belongs to the path this client builds, so a leftover `/v2` or `/v3` suffix on
-  `YANDEX_TRACKER_BASE_URL` is stripped. `authHeaders()` picks `OAuth` vs
+  and one org id are present, and that `YANDEX_TRACKER_TIMEOUT` is a positive
+  number. The version belongs to the path this client builds, so a leftover
+  `/v2` or `/v3` suffix on `YANDEX_TRACKER_BASE_URL` is stripped there, once. `authHeaders()` picks `OAuth` vs
   `Bearer` from `authScheme` and sends exactly one org header —
   `X-Cloud-Org-Id` when a cloud org id is set, `X-Org-Id` otherwise.
 - **`Tracker.request(method, path, { params, body, headers })`** — the only way
-  out. Builds `{apiRoot}{path}`, sends it with the configured timeout, and
-  returns the decoded body untouched. `upload()` and `download()` are the two
-  variants the wire format forces: multipart in, streamed bytes out.
+  out. Builds `{baseUrl}/v3{path}`, sends it with the configured timeout — which
+  runs until the response headers arrive, not through the body, so a large
+  download is not cut off — and returns `{ headers, body }`: the decoded body untouched, plus the response
+  headers the documentation gives a meaning to (`X-Total-Count`,
+  `X-Total-Pages`, `Link`, `X-Scroll-Id`, `X-Scroll-Token`, `ETag`) — a
+  scrollable search is unusable without its `X-Scroll-Id`. `upload()` returns
+  the same; `download()` streams bytes to disk and returns where they landed.
+- **Paths** — every path with a value in it is written as
+  `` path`/issues/${issueId}` ``: the tag runs each value through
+  `encodeURIComponent`, so a `#`, `?` or `/` in an agent-supplied id or file
+  name stays inside its segment.
 - **Query spelling** — booleans go out as `true`/`false` rather than JavaScript's
   `String(true)`, and an array value becomes a repeated key, which is how
   `createdAt=from:…&createdAt=to:…` is expressed.
@@ -210,14 +218,11 @@ Yandex Tracker: …")`; any non-2xx becomes `TrackerApiError(status, message,
 payload)`. The error body shape is _not_ documented anywhere in the API
   reference, so the message is read best-effort from `errorMessages` / `errors`
   with a fallback to the raw body and then the HTTP status text.
-- **Retries** — 429 and 5xx are retried with exponential backoff on GET, HEAD,
-  OPTIONS and DELETE — the methods a repeat cannot duplicate anything with.
-  POST is never repeated, including the six that only read (`/_search`,
-  `/_count`): a search with `scrollId` moves its cursor, so a repeat after a lost
-  response silently skips a page, and a search that timed out is the last thing
-  to send three more times. `error-codes.md` documents that 429
-  exists but specifies neither a quota nor a `Retry-After` header, so the backoff
-  is ours.
+- **No retries** — a 429, a 5xx or a transport failure goes back to the agent
+  as a tool error. A repeat is only safe when the call is: a DELETE whose
+  response was lost gets a 404 the second time, a POST creates a second object,
+  a scroll search skips a page. The agent knows which of its calls those are;
+  the client does not.
 - **`given({...})`** — drops the arguments a caller left unset, so an omitted
   optional parameter is absent from the request rather than sent as `null`.
 

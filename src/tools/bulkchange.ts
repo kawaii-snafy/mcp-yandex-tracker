@@ -1,7 +1,7 @@
 /** Bulk issue operations — https://yandex.ru/support/tracker/en/api/bulkchange/bulk-update-issues.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 /**
@@ -132,7 +132,7 @@ https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md`,
         .min(1)
         .describe("ID of the bulk operation, as returned when it was started."),
     },
-    run: (tracker, a) => tracker.request("GET", `/bulkchange/${a.bulkchangeId}`),
+    run: (tracker, a) => tracker.request("GET", path`/bulkchange/${a.bulkchangeId}`),
   }),
 
   tool({
@@ -147,6 +147,6 @@ https://yandex.ru/support/tracker/en/api/bulkchange/bulk-move-info.md`,
         .min(1)
         .describe("ID of the bulk operation, as returned when it was started."),
     },
-    run: (tracker, a) => tracker.request("GET", `/bulkchange/${a.bulkchangeId}/issues`),
+    run: (tracker, a) => tracker.request("GET", path`/bulkchange/${a.bulkchangeId}/issues`),
   }),
 ];

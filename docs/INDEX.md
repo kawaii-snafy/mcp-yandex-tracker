@@ -26,7 +26,7 @@ and `tools/list` / `tools/call` routing — **stdout carries only protocol
 messages, logs go to stderr**. `src/client.ts` holds the whole Tracker side:
 config from the environment and a single `Tracker.request()` that builds a `/v3`
 URL, throws `TrackerApiError` on a bad response, and returns the decoded body
-untouched. Every endpoint in `src/tools/` is one entry in an array — name,
+untouched with the documented response headers next to it. Every endpoint in `src/tools/` is one entry in an array — name,
 description, a Zod shape for the documented parameters, and a `run` that calls
 `request()` — so the registry _is_ the API surface. `src/dispatch.ts` projects
 that registry into the three tools a host sees: `tracker_api` carries the

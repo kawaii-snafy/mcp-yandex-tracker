@@ -1,7 +1,7 @@
 /** Boards, columns and sprints — https://yandex.ru/support/tracker/en/api/boards/get-boards.md */
 
 import { z } from "zod";
-import { given, ifMatch } from "../client.ts";
+import { given, ifMatch, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const boardTools = [
@@ -51,7 +51,7 @@ https://yandex.ru/support/tracker/en/api/boards/get-board.md`,
     input: {
       boardId: z.string().min(1).describe("Board ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/boards/${a.boardId}`),
+    run: (tracker, a) => tracker.request("GET", path`/boards/${a.boardId}`),
   }),
 
   tool({
@@ -168,7 +168,7 @@ The current version is the \`version\` field returned by tracker_get_board.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/boards/${a.boardId}`, {
+      tracker.request("PATCH", path`/boards/${a.boardId}`, {
         body: given({
           name: a.name,
           columns: a.columns,
@@ -192,7 +192,7 @@ https://yandex.ru/support/tracker/en/api/boards/delete-board.md`,
     input: {
       boardId: z.string().min(1).describe("Board ID."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/boards/${a.boardId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/boards/${a.boardId}`),
   }),
 
   tool({
@@ -204,7 +204,7 @@ https://yandex.ru/support/tracker/en/api/boards/get-columns.md`,
     input: {
       boardId: z.string().min(1).describe("Board ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/boards/${a.boardId}/columns`),
+    run: (tracker, a) => tracker.request("GET", path`/boards/${a.boardId}/columns`),
   }),
 
   tool({
@@ -217,7 +217,7 @@ https://yandex.ru/support/tracker/en/api/boards/get-column.md`,
       boardId: z.string().min(1).describe("Board ID."),
       columnId: z.string().min(1).describe("Column ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/boards/${a.boardId}/columns/${a.columnId}`),
+    run: (tracker, a) => tracker.request("GET", path`/boards/${a.boardId}/columns/${a.columnId}`),
   }),
 
   tool({
@@ -243,7 +243,7 @@ The current version is the \`version\` field returned by tracker_get_board.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/boards/${a.boardId}/columns/`, {
+      tracker.request("POST", path`/boards/${a.boardId}/columns/`, {
         body: given({ name: a.name, statuses: a.statuses }),
         headers: ifMatch(a.version),
       }),
@@ -274,7 +274,7 @@ The current version is the \`version\` field returned by tracker_get_board.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/boards/${a.boardId}/columns/${a.columnId}`, {
+      tracker.request("PATCH", path`/boards/${a.boardId}/columns/${a.columnId}`, {
         body: given({ name: a.name, statuses: a.statuses }),
         headers: ifMatch(a.version),
       }),
@@ -300,7 +300,7 @@ The current version is the \`version\` field returned by tracker_get_board.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("DELETE", `/boards/${a.boardId}/columns/${a.columnId}`, {
+      tracker.request("DELETE", path`/boards/${a.boardId}/columns/${a.columnId}`, {
         headers: ifMatch(a.version),
       }),
   }),
@@ -318,7 +318,7 @@ running is the one with \`status: in_progress\`.`,
     input: {
       boardId: z.string().min(1).describe("Board ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/boards/${a.boardId}/sprints`),
+    run: (tracker, a) => tracker.request("GET", path`/boards/${a.boardId}/sprints`),
   }),
 
   tool({
@@ -330,7 +330,7 @@ https://yandex.ru/support/tracker/en/api/boards/get-sprint.md`,
     input: {
       sprintId: z.string().min(1).describe("Sprint ID."),
     },
-    run: (tracker, a) => tracker.request("GET", `/sprints/${a.sprintId}`),
+    run: (tracker, a) => tracker.request("GET", path`/sprints/${a.sprintId}`),
   }),
 
   tool({
@@ -386,7 +386,7 @@ The current version is the \`version\` field returned by tracker_get_sprint.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/sprints/${a.sprintId}`, {
+      tracker.request("PATCH", path`/sprints/${a.sprintId}`, {
         body: given({
           name: a.name,
           startDate: a.startDate,
@@ -417,7 +417,7 @@ The current version is the \`version\` field returned by tracker_get_sprint.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/sprints/${a.sprintId}/_start`, {
+      tracker.request("POST", path`/sprints/${a.sprintId}/_start`, {
         headers: ifMatch(a.version),
       }),
   }),
@@ -442,7 +442,7 @@ The current version is the \`version\` field returned by tracker_get_sprint.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("POST", `/sprints/${a.sprintId}/_archive`, {
+      tracker.request("POST", path`/sprints/${a.sprintId}/_archive`, {
         headers: ifMatch(a.version),
       }),
   }),
@@ -456,6 +456,6 @@ https://yandex.ru/support/tracker/en/api/boards/delete-sprint.md`,
     input: {
       sprintId: z.string().min(1).describe("Sprint ID."),
     },
-    run: (tracker, a) => tracker.request("DELETE", `/sprints/${a.sprintId}`),
+    run: (tracker, a) => tracker.request("DELETE", path`/sprints/${a.sprintId}`),
   }),
 ];

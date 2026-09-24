@@ -1,7 +1,7 @@
 /** Reference dictionaries — https://yandex.ru/support/tracker/en/api/admin/get-statuses.md */
 
 import { z } from "zod";
-import { given } from "../client.ts";
+import { given, path } from "../client.ts";
 import { tool } from "../tool.ts";
 
 export const adminTools = [
@@ -60,7 +60,7 @@ current \`version\`.`,
         .describe('Issue type name per language: {"ru": "Покупатель", "en": "Customer"}.'),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/issuetypes/${a.issueTypeId}`, {
+      tracker.request("PATCH", path`/issuetypes/${a.issueTypeId}`, {
         params: given({ version: a.version }),
         body: given({ name: a.name }),
       }),
@@ -144,7 +144,7 @@ current \`version\`.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/statuses/${a.statusId}`, {
+      tracker.request("PATCH", path`/statuses/${a.statusId}`, {
         params: given({ version: a.version }),
         body: given({
           name: a.name,
@@ -221,7 +221,7 @@ current \`version\`.`,
         ),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/resolutions/${a.resolutionId}`, {
+      tracker.request("PATCH", path`/resolutions/${a.resolutionId}`, {
         params: given({ version: a.version }),
         body: given({ name: a.name, description: a.description, order: a.order }),
       }),
@@ -310,7 +310,7 @@ the Tracker interface. Call tracker_get_priorities to read the current
       description: z.string().optional().describe("Priority description."),
     },
     run: (tracker, a) =>
-      tracker.request("PATCH", `/priorities/${a.priorityId}`, {
+      tracker.request("PATCH", path`/priorities/${a.priorityId}`, {
         params: given({ version: a.version }),
         body: given({ name: a.name, description: a.description }),
       }),

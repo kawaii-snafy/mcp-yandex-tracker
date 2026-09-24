@@ -70,7 +70,7 @@ A tool is one endpoint, so adding one starts by opening its page.
        perPage: z.number().int().optional().describe("Comments per page."),
      },
      run: (tracker, a) =>
-       tracker.request("GET", `/issues/${a.issueId}/comments`, {
+       tracker.request("GET", path`/issues/${a.issueId}/comments`, {
          params: given({ expand: a.expand, perPage: a.perPage }),
        }),
    }),
@@ -152,6 +152,6 @@ For the end-to-end path, run the README's stdio smoke test against
   filtering in the server.
 - **Auth schemes.** OAuth vs IAM is decided in `authHeaders()` by `authScheme`.
   Add new schemes there, not in a tool.
-- **Retries.** `#send` repeats 429 and 5xx on GET, HEAD, OPTIONS and DELETE
-  only. A POST is never repeated, not even a read-only `/_search`: its scroll
-  cursor moves on every call.
+- **Retries.** There are none, on purpose: a failed call is a tool error and the
+  agent decides whether to send it again. Do not add them back per method — a
+  lost DELETE response repeated is a false 404.
