@@ -9,7 +9,7 @@
 
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -248,17 +248,41 @@ export class Tracker {
     destDir: string,
     fileName: string,
   ): Promise<{ path: string; name: string; size: number }> {
-    // basename guards against path traversal through a Tracker-supplied or
-    // caller-supplied name.
-    const name = basename(fileName) || "attachment";
-    const response = await this.#send("GET", this.#url(path));
-    await mkdir(destDir, { recursive: true });
+    // Every argument is checked before the request, so a bad one costs no transfer.
+    //
+    // A relative directory would resolve against wherever the host happened to
+    // start this process — somewhere the agent cannot see, and a relative `path`
+    // back would not tell it either.
+    if (!isAbsolute(destDir)) {
+      throw new TypeError(`destDir must be an absolute path, got "${destDir}".`);
+    }
+    // basename keeps a Tracker-supplied or caller-supplied name inside destDir;
+    // "." and ".." are the names it lets through that still point outside a file.
+    const name = basename(fileName);
+    if (name === "" || name === "." || name === "..") {
+      throw new TypeError(`"${fileName}" is not a file name to save under.`);
+    }
     const destPath = join(destDir, name);
+    const taken = () => new TypeError(`${destPath} already exists — pass another saveAs.`);
+    if (
+      await stat(destPath).then(
+        () => true,
+        () => false,
+      )
+    )
+      throw taken();
+
+    const response = await this.#send("GET", this.#url(path));
     if (!response.body) throw new TrackerApiError(0, "Yandex Tracker returned an empty body.");
+    await mkdir(destDir, { recursive: true });
     try {
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(destPath));
+      // `wx`, not the default `w`: a file that appeared since the check above
+      // is refused rather than truncated.
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(destPath, { flags: "wx" }));
     } catch (error) {
-      // A truncated file would look like a finished one to whoever opens it next.
+      // EEXIST means the file is someone else's; anything else left a file of
+      // ours behind, and a truncated one would pass for finished.
+      if (errorCode(error) === "EEXIST") throw taken();
       await rm(destPath, { force: true });
       throw new TrackerApiError(0, `Download from Yandex Tracker broke off: ${message(error)}`);
     }
@@ -378,6 +402,10 @@ function errorMessage(payload: unknown): string | undefined {
       return entries.map(([key, value]) => `${key}: ${String(value)}`).join("; ");
   }
   return undefined;
+}
+
+function errorCode(error: unknown): unknown {
+  return error instanceof Error && "code" in error ? error.code : undefined;
 }
 
 function message(error: unknown): string {

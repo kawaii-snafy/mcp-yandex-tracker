@@ -1143,7 +1143,7 @@ https://yandex.ru/support/tracker/en/api/issues/get-attachments-list.md`,
 GET /v3/issues/{issueId}/attachments/{fileId}/{fileName}
 https://yandex.ru/support/tracker/en/api/issues/get-attachment.md
 
-Writes the file to \`destDir\` and returns {"path", "name", "size"}.`,
+Writes the file to \`destDir\` and returns {"path", "name", "size"}. An existing file is never overwritten.`,
     effect: "create",
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
@@ -1152,11 +1152,17 @@ Writes the file to \`destDir\` and returns {"path", "name", "size"}.`,
         .string()
         .min(1)
         .describe("File name, from tracker_get_attachments. Part of the request path."),
-      destDir: z.string().min(1).describe("Local directory to save the downloaded file in."),
+      destDir: z
+        .string()
+        .min(1)
+        .describe("Absolute path of the local directory to save the file in. Created if missing."),
       saveAs: z
         .string()
+        .min(1)
         .optional()
-        .describe("Name to save the file under locally. Defaults to `fileName`."),
+        .describe(
+          "Name to save the file under locally. Defaults to `fileName`. Must not exist in `destDir` yet.",
+        ),
     },
     run: (tracker, a) =>
       tracker.download(
@@ -1173,7 +1179,7 @@ Writes the file to \`destDir\` and returns {"path", "name", "size"}.`,
 GET /v3/issues/{issueId}/thumbnails/{fileId}
 https://yandex.ru/support/tracker/en/api/issues/get-attachment-preview.md
 
-Writes the thumbnail to \`destDir\` and returns {"path", "name", "size"}.`,
+Writes the thumbnail to \`destDir\` and returns {"path", "name", "size"}. An existing file is never overwritten.`,
     effect: "create",
     input: {
       issueId: z.string().min(1).describe("Issue ID or key."),
@@ -1181,11 +1187,19 @@ Writes the thumbnail to \`destDir\` and returns {"path", "name", "size"}.`,
         .string()
         .min(1)
         .describe("Unique ID of the attached file, from tracker_get_attachments."),
-      destDir: z.string().min(1).describe("Local directory to save the thumbnail in."),
+      destDir: z
+        .string()
+        .min(1)
+        .describe(
+          "Absolute path of the local directory to save the thumbnail in. Created if missing.",
+        ),
       saveAs: z
         .string()
+        .min(1)
         .optional()
-        .describe("Name to save the thumbnail under locally. Defaults to `fileId`."),
+        .describe(
+          "Name to save the thumbnail under locally. Defaults to `fileId`. Must not exist in `destDir` yet.",
+        ),
     },
     run: (tracker, a) =>
       tracker.download(

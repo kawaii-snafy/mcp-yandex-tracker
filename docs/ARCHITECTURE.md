@@ -208,6 +208,10 @@ into Node 20+.
   `X-Total-Pages`, `Link`, `X-Scroll-Id`, `X-Scroll-Token`, `ETag`) — a
   scrollable search is unusable without its `X-Scroll-Id`. `upload()` returns
   the same; `download()` streams bytes to disk and returns where they landed.
+  Before it sends anything, it refuses a relative `destDir`, a name that
+  `basename` leaves as `.` or `..`, and a file that already exists — and it
+  opens with `wx`, so one that appears mid-request is not truncated either. A
+  transfer that breaks off removes the partial file it created.
 - **Paths** — every path with a value in it is written as
   `` path`/issues/${issueId}` ``: the tag runs each value through
   `encodeURIComponent`, so a `#`, `?` or `/` in an agent-supplied id or file
