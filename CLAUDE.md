@@ -8,9 +8,11 @@ A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents
 It is a deliberately thin wrapper: **one tool per documented endpoint** — 179 in
 the registry — the API's own parameter names on the way in, the API's own JSON on
 the way out (as `body`, next to the documented response `headers`). TypeScript on Node, compiled by `tsc` into plain JavaScript under
-`build/`, installed straight from GitHub (`npx github:kawaii-snafy/yandex-tracker-mcp`)
-— it is not on npm, `private: true` keeps it off, and `prepare` builds `build/`
-on install. There is no HTTP/SSE transport — one process serves
+`build/`. It is not on npm (`private: true` keeps it off): pushing a `vX.Y.Z`
+tag makes `.github/workflows/release.yml` attach the `npm pack` archive to a
+GitHub release, and hosts run that URL with `npx`. `prepare` compiles `build/`
+for installs from git. A release needs `package.json`'s `version` and
+`SERVER_VERSION` in `src/server.ts` to match the tag — the workflow checks. There is no HTTP/SSE transport — one process serves
 one client over stdin/stdout.
 
 Those 179 reach the host as **three** MCP tools. `src/dispatch.ts` explains why in

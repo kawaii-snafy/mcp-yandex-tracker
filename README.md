@@ -36,19 +36,25 @@ endpoint's schema.
 
 ## Install
 
-The package is not on npm — `npx` installs it straight from this repository:
+The package is not on npm. Every [release](https://github.com/kawaii-snafy/yandex-tracker-mcp/releases)
+carries it as an archive, and `npx` runs it from there:
 
 ```sh
-npx -y github:kawaii-snafy/yandex-tracker-mcp          # the default branch
-npx -y github:kawaii-snafy/yandex-tracker-mcp#v1.0.0   # a tagged release
+npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz
 ```
 
-npm clones the repository, installs its dev dependencies and runs `prepare`,
-which compiles `build/` on the spot. The first start therefore takes a little
-longer and needs `git` on the machine.
+Change `v1.0.0` in the URL to move to another release. The archive is already
+compiled, so the install is the package and its two dependencies — no `git`, no
+build.
 
-Keep the `github:` prefix. A bare `npx yandex-tracker-mcp` asks the npm registry,
-where that name belongs to another package.
+To run unreleased code, install from the repository instead:
+`npx -y github:kawaii-snafy/yandex-tracker-mcp` (append `#<branch>` for a
+branch). npm then clones it, installs the dev dependencies and compiles `build/`
+through `prepare`, so the first start is slower and needs `git`.
+
+Whichever you use, keep the full URL or the `github:` prefix: a bare
+`npx yandex-tracker-mcp` asks the npm registry, where that name belongs to
+another package.
 
 ## Usage with Codex
 
@@ -57,7 +63,10 @@ Add the server to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.yandex-tracker]
 command = "npx"
-args = ["-y", "github:kawaii-snafy/yandex-tracker-mcp"]
+args = [
+  "-y",
+  "https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz",
+]
 
 [mcp_servers.yandex-tracker.env]
 YANDEX_TRACKER_TOKEN = "..."
@@ -88,7 +97,7 @@ claude mcp add --transport stdio \
   --env YANDEX_TRACKER_TOKEN="..." \
   --env YANDEX_TRACKER_CLOUD_ORG_ID="..." \
   yandex-tracker \
-  -- npx -y github:kawaii-snafy/yandex-tracker-mcp
+  -- npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz
 ```
 
 For a non-cloud organization, use `--env YANDEX_TRACKER_ORG_ID="..."` instead
@@ -129,7 +138,7 @@ notification) first:
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   sleep 5
-} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y github:kawaii-snafy/yandex-tracker-mcp
+} | YANDEX_TRACKER_TOKEN="..." YANDEX_TRACKER_CLOUD_ORG_ID="..." npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/v1.0.0/yandex-tracker-mcp.tgz
 ```
 
 The trailing `sleep` keeps stdin open: `printf` alone closes it immediately and
@@ -165,6 +174,20 @@ npm run docs:tools  # regenerate the docs/TOOLS.md tables
 node src/cli.ts     # run from source
 node build/cli.js   # run the compiled entry point
 ```
+
+### Releasing
+
+Set the version in `package.json` and `SERVER_VERSION` in `src/server.ts`, merge,
+then tag and push the tag:
+
+```sh
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+`.github/workflows/release.yml` checks that the tag and both versions agree,
+packs the archive, installs it on Node 20, runs the MCP handshake against it and
+publishes the release with the archive as `yandex-tracker-mcp.tgz`. Then update
+the version in the install URLs in this README and `docs/INTEGRATION.md`.
 
 Node runs the TypeScript sources directly, so development needs Node 22.18 or
 newer. **Running it does not**: `build/` is plain JavaScript and `build/cli.js` carries

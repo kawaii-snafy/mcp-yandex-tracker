@@ -1,0 +1,56 @@
+name: Release
+
+# Pushing a tag vX.Y.Z publishes a GitHub release carrying the npm archive
+# (`npm pack`) as yandex-tracker-mcp.tgz. Users run it straight from there:
+#
+#   npx -y https://github.com/kawaii-snafy/yandex-tracker-mcp/releases/download/vX.Y.Z/yandex-tracker-mcp.tgz
+#
+# The archive holds the compiled build/, so installing it needs neither git,
+# nor the dev dependencies, nor a build — just the two runtime dependencies.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      # The version lives in two places the tag has to agree with: what npm
+      # records and what the server reports in its initialize response.
+      - name: Tag matches the version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node -e 'if (require("./package.json").version !== process.argv[1]) throw new Error(`package.json is not ${process.argv[1]}`)' "$version"
+          grep -q "SERVER_VERSION = \"$version\"" src/server.ts || { echo "src/server.ts SERVER_VERSION is not $version"; exit 1; }
+
+      # `prepare` builds build/ as part of the install.
+      - run: npm ci
+      - run: npm run typecheck
+
+      - name: Pack
+        run: mv "$(npm pack --silent)" yandex-tracker-mcp.tgz
+
+      # The archive is what users get, so it is what gets tried — on the oldest
+      # Node the package supports.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: Install the archive and handshake
+        run: |
+          npx -y ./yandex-tracker-mcp.tgz < /dev/null
+          scripts/handshake.sh npx -y ./yandex-tracker-mcp.tgz
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" yandex-tracker-mcp.tgz --verify-tag --generate-notes

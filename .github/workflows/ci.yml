@@ -64,17 +64,4 @@ jobs:
           npx -y "git+file://$GITHUB_WORKSPACE#$(git rev-parse HEAD)" < /dev/null
 
       - name: Handshake over stdio
-        run: |
-          {
-            printf '%s\n' \
-              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
-              '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-              '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-            sleep 5
-          } | npx -y "$SPEC" > out.jsonl
-          node -e '
-            const lines = require("fs").readFileSync("out.jsonl", "utf8").trim().split("\n").map(JSON.parse);
-            const tools = lines.find((m) => m.id === 2).result.tools;
-            if (tools.length !== 3) throw new Error(`expected 3 tools, got ${tools.length}`);
-            console.log(tools.map((t) => t.name).join(", "));
-          '
+        run: scripts/handshake.sh npx -y "$SPEC"

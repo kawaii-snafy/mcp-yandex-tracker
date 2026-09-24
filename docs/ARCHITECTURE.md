@@ -44,10 +44,12 @@ is a dev utility Node runs from source, and including it would push an extra
 directory level into `build/`.
 
 Because nothing is bundled, `@modelcontextprotocol/server` and `zod` are real
-`dependencies` and a host's `npx -y github:kawaii-snafy/yandex-tracker-mcp` resolves them on first
-run. The package is installed from git rather than the npm registry, so `build/`
-is not committed: npm installs the dev dependencies and runs `prepare`
-(`npm run build`) in its clone before packing it. That is the price of dropping the bundler, and it is why the list of two
+`dependencies` and a host's `npx` resolves them on first run. The package is not
+on the npm registry: a tag makes `.github/workflows/release.yml` attach the
+`npm pack` archive, compiled `build/` included, to a GitHub release, and hosts
+install that URL. `build/` itself is never committed — installing from git
+instead (`github:kawaii-snafy/yandex-tracker-mcp`) compiles it through
+`prepare`. That is the price of dropping the bundler, and it is why the list of two
 is a design constraint rather than an accident.
 
 ## Protocol layer: the official MCP SDK
