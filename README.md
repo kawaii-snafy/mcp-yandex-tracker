@@ -10,8 +10,9 @@ reference dictionaries.
 
 It is a thin wrapper on purpose: **one tool per documented endpoint** — 179 of
 them — the API's own parameter names on the way in, the API's own JSON on the way
-out. Every endpoint's description links to the documentation page it was written
-from, so the agent can always read the source of truth.
+out, as `body` next to the response `headers` the documentation names. Every
+endpoint's description links to the documentation page it was written from, so
+the agent can always read the source of truth.
 
 Those 179 do not go on the wire as 179 MCP tools, which would cost every
 conversation ~55k tokens of argument schemas before a word is said. Three tools

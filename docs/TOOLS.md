@@ -3,7 +3,7 @@
 This server is a thin wrapper over the [Yandex Tracker REST API
 v3](https://yandex.ru/support/tracker/en/llms.txt): **one tool per documented
 endpoint**, the API's own parameter names on the way in, the API's own JSON on
-the way out.
+the way out — next to the response headers it documents.
 
 That is why this page is an index rather than a copy of Yandex's argument tables.
 The documentation is the reference — every row below links to the page its
@@ -37,8 +37,8 @@ endpoints are exposed as data and three tools operate on them:
 | Tool           | Arguments                  | Returns                                                                                        |
 | -------------- | -------------------------- | ---------------------------------------------------------------------------------------------- |
 | `tracker_api`  | `tools`: names to describe | For each: its endpoint, doc URL, which dispatcher to use, and the JSON Schema of its arguments |
-| `tracker_read` | `tool`, `args`             | The endpoint's response. Accepts `read` endpoints only                                         |
-| `tracker_call` | `tool`, `args`             | The endpoint's response. Accepts `create` and `modify` endpoints                               |
+| `tracker_read` | `tool`, `args`             | `{headers, body}` of the endpoint's response. Accepts `read` endpoints only                    |
+| `tracker_call` | `tool`, `args`             | `{headers, body}` of the endpoint's response. Accepts `create` and `modify` endpoints          |
 
 `tracker_api`'s own description carries the catalogue: every endpoint name with a
 one-line summary, grouped by section, `(read)`-marked where `tracker_read` is the
@@ -50,9 +50,24 @@ The split into two dispatchers preserves the MCP annotations a host acts on:
 `tracker_call` is `destructiveHint` and gets confirmed. One dispatcher covering
 both would force every read through a confirmation prompt.
 
-Responses come back as a single JSON text block (`content[0].text`) — raw Tracker
-JSON, nothing stripped and nothing reshaped. Trim large responses with the API's
-own `fields` and `expand` parameters.
+Responses come back as a single JSON text block (`content[0].text`) holding
+`{headers, body}`. `body` is the raw Tracker JSON, nothing stripped and nothing
+reshaped; trim a large one with the API's own `fields` and `expand` parameters.
+
+`headers` is the one place the wrapper is not literal. Some endpoints put part of
+their answer in response headers, so the dispatchers pass on the ones the
+documentation names, whenever Tracker sends them — and only those, since the
+transport headers would cost every call tokens:
+
+| Header                           | Documented in                                       | Carries                            |
+| -------------------------------- | --------------------------------------------------- | ---------------------------------- |
+| `X-Total-Count`, `X-Total-Pages` | common-format.md, search-issues.md                  | The size of a paginated result     |
+| `Link`                           | get-changelog.md, get-comments.md, search-issues.md | The first and next page            |
+| `X-Scroll-Id`, `X-Scroll-Token`  | search-issues.md                                    | The cursor of a scrollable search  |
+| `ETag`                           | get-comment.md, get-component.md, get-version.md    | The version of the object returned |
+
+The two attachment downloads are the exception: they return where the file
+landed, `{path, name, size}`.
 
 Business failures (bad arguments, an unknown endpoint name, the wrong dispatcher,
 Tracker API errors, config problems) come back in the **same shape** with
