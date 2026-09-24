@@ -26,7 +26,7 @@ export const API_VERSION = "v3";
  * - search-issues.md: `X-Scroll-Id`, `X-Scroll-Token` of a scrollable search.
  * - get-comment.md, get-component.md, get-version.md: `ETag`.
  */
-const RESPONSE_HEADERS = [
+export const RESPONSE_HEADERS = [
   "X-Total-Pages",
   "X-Total-Count",
   "Link",
@@ -79,6 +79,8 @@ export type TrackerConfig = {
 const DEFAULT_BASE_URL = "https://api.tracker.yandex.net";
 const DEFAULT_AUTH_SCHEME = "OAuth";
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** setTimeout's ceiling: Node fires any longer delay after 1 ms instead. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 export function configFromEnv(
   env: Record<string, string | undefined> = process.env,
@@ -107,19 +109,20 @@ export function configFromEnv(
 }
 
 /**
- * Seconds in the environment, milliseconds in the config. Anything but a
- * positive number is refused here: `Number("30s")` is NaN and `Number("")` is 0,
- * and either would otherwise surface as a network failure on every call.
+ * Seconds in the environment, milliseconds in the config. Anything else is
+ * refused here, or it would surface as a network failure on every call:
+ * `Number("30s")` is NaN, `Number("")` is 0, and a month-long "no timeout"
+ * overflows setTimeout and fires at once.
  */
 function timeoutFrom(value: string | undefined): number {
   if (value === undefined) return DEFAULT_TIMEOUT_MS;
-  const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  const ms = Number(value) * 1000;
+  if (!Number.isFinite(ms) || ms <= 0 || ms > MAX_TIMEOUT_MS) {
     throw new TrackerConfigError(
-      `YANDEX_TRACKER_TIMEOUT must be a positive number of seconds, got "${value}".`,
+      `YANDEX_TRACKER_TIMEOUT must be a number of seconds between 0 and ${Math.floor(MAX_TIMEOUT_MS / 1000)}, got "${value}".`,
     );
   }
-  return seconds * 1000;
+  return ms;
 }
 
 /**
@@ -160,7 +163,7 @@ export function given<T extends Record<string, unknown>>(values: T): Record<stri
 }
 
 /**
- * Build a request path, escaping every interpolated value as one segment.
+ * Build a request path, keeping every interpolated value inside its segment.
  *
  * Tools take ids and names from an agent, and a raw `#`, `?` or `/` in one of
  * them would end the path early or address a different object: an attachment
@@ -168,9 +171,20 @@ export function given<T extends Record<string, unknown>>(values: T): Record<stri
  * is written as path`/issues/${issueId}`.
  */
 export function path(strings: TemplateStringsArray, ...values: Array<string | number>): string {
-  return strings.reduce((built, literal, i) =>
-    i === 0 ? literal : built + encodeURIComponent(values[i - 1]!) + literal,
-  );
+  return strings.reduce((built, literal, i) => built + segment(values[i - 1]!) + literal);
+}
+
+function segment(value: string | number): string {
+  const text = String(value);
+  // No escaping helps here: URL resolution drops "." and ".." segments, `%2E`
+  // spelled or not, so a comment id of ".." would DELETE the entity it is on.
+  // An empty one turns an object's path into its collection's.
+  if (text === "" || text === "." || text === "..") {
+    throw new TypeError(`"${text}" cannot be an id or a name in a request path.`);
+  }
+  // ":" and "@" are legal inside a segment, and the docs write them bare —
+  // get-user.md addresses a numeric login as /users/login:12345.
+  return encodeURIComponent(text).replaceAll("%3A", ":").replaceAll("%40", "@");
 }
 
 /**
@@ -272,9 +286,12 @@ export class Tracker {
     )
       throw taken();
 
-    const response = await this.#send("GET", this.#url(path));
-    if (!response.body) throw new TrackerApiError(0, "Yandex Tracker returned an empty body.");
+    // Before the request too: a destDir that cannot be created is the caller's
+    // mistake, not something to find out with a response already streaming.
     await mkdir(destDir, { recursive: true });
+
+    const response = await this.#send("GET", this.#url(path), { stream: true });
+    if (!response.body) throw new TrackerApiError(0, "Yandex Tracker returned an empty body.");
     try {
       // `wx`, not the default `w`: a file that appeared since the check above
       // is refused rather than truncated.
@@ -305,7 +322,13 @@ export class Tracker {
   async #send(
     method: HttpMethod,
     url: string,
-    init: { headers?: Record<string, string>; body?: string | FormData; json?: boolean } = {},
+    init: {
+      headers?: Record<string, string>;
+      body?: string | FormData;
+      json?: boolean;
+      /** The body is a file to stream, read without the deadline. */
+      stream?: boolean;
+    } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = {
       ...authHeaders(this.config),
@@ -317,21 +340,25 @@ export class Tracker {
     // a delete that went through into a 404, and only the agent knows which of
     // its calls are safe to send again. A 429 or 5xx goes back to it as is.
     //
-    // The timeout covers the wait for the response headers and nothing after:
-    // `AbortSignal.timeout` would also cut off reading the body, and a large
-    // attachment takes longer than any sensible deadline for an answer. Sending
-    // an upload is still inside it — fetch sends the body before the headers.
+    // The deadline runs until the caller has read the body — a JSON answer that
+    // stalls halfway fails like one that never came — except for a download,
+    // whose deadline ends with the headers: a large attachment takes longer to
+    // arrive than any sensible wait for an answer. Sending an upload is always
+    // inside it, since fetch sends the body before the headers come back.
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(new Error("timed out")), this.config.timeout);
+    // unref: a pending deadline must not keep the process alive once stdin closes.
+    const timer = setTimeout(
+      () => abort.abort(new Error("timed out")),
+      this.config.timeout,
+    ).unref();
     let response: Response;
     try {
       response = await this.#fetch(url, { method, headers, body: init.body, signal: abort.signal });
     } catch (error) {
       throw new TrackerApiError(0, `Failed to reach Yandex Tracker: ${message(error)}`);
-    } finally {
-      clearTimeout(timer);
     }
     if (!response.ok) throw await apiError(response);
+    if (init.stream) clearTimeout(timer);
     return response;
   }
 }
@@ -357,7 +384,12 @@ async function decode(response: Response): Promise<TrackerResponse> {
 async function decodeBody(response: Response): Promise<unknown> {
   // error-codes.md: 204 means the DELETE went through and carries no body.
   if (response.status === 204) return null;
-  const text = await response.text();
+  const text = await response.text().catch((error: unknown) => {
+    throw new TrackerApiError(
+      0,
+      `Failed to read the response from Yandex Tracker: ${message(error)}`,
+    );
+  });
   if (!text) return null;
   try {
     return JSON.parse(text);

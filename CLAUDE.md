@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A **stdio MCP server** that exposes the Yandex Tracker REST API v3 to LLM agents.
 It is a deliberately thin wrapper: **one tool per documented endpoint** — 179 in
 the registry — the API's own parameter names on the way in, the API's own JSON on
-the way out. TypeScript on Node, compiled by `tsc` into plain JavaScript under
+the way out (as `body`, next to the documented response `headers`). TypeScript on Node, compiled by `tsc` into plain JavaScript under
 `build/`, installed straight from GitHub (`npx github:kawaii-snafy/yandex-tracker-mcp`)
 — it is not on npm, `private: true` keeps it off, and `prepare` builds `build/`
 on install. There is no HTTP/SSE transport — one process serves
@@ -138,8 +138,9 @@ Six cross-cutting mechanisms to know before editing:
   that knows whether a call is safe to send again. `upload()` and `download()`
   are the two variants the wire format forces.
 - **Paths are built with the `path` tag.** `` path`/issues/${a.issueId}` ``
-  escapes every interpolated value with `encodeURIComponent`; a bare template
-  literal lets a `#`, `?` or `/` in an agent-supplied id escape its segment.
+  escapes every interpolated value with `encodeURIComponent` and refuses `""`,
+  `.` and `..`; a bare template literal lets a `#`, `?`, `/` or dot-segment in
+  an agent-supplied id address a different object.
 - **Errors are thrown, not wrapped.** `@modelcontextprotocol/server` turns a
   thrown error into an `isError: true` tool result carrying its message, so no
   handler needs a try/catch.

@@ -20,7 +20,7 @@
  */
 
 import { z } from "zod";
-import type { Tracker } from "./client.ts";
+import { RESPONSE_HEADERS, type Tracker } from "./client.ts";
 import { parseEndpoint, tool, type ToolDef } from "./tool.ts";
 import { sections, toolsByName } from "./tools/index.ts";
 
@@ -109,6 +109,9 @@ async function invoke(
   return def.run(tracker(), parsed.data);
 }
 
+/** What both dispatchers hand back, with the header list read off the client. */
+const RETURNS = `Returns \`{headers, body}\`: \`body\` is the API's own JSON, untouched; \`headers\` holds whichever of ${RESPONSE_HEADERS.join(", ")} Tracker sent — the total, the next page, the scroll cursor.`;
+
 const TOOL_ARG = z
   .string()
   .min(1)
@@ -148,7 +151,7 @@ ${renderCatalogue()}`,
     name: "tracker_read",
     description: `Call a Yandex Tracker endpoint that only reads. Accepts the endpoints marked \`(read)\` in the catalogue in tracker_api's description; anything that writes goes through tracker_call.
 
-Returns \`{headers, body}\`: \`body\` is the API's own JSON, untouched; \`headers\` holds whichever of X-Total-Count, X-Total-Pages, Link, X-Scroll-Id, X-Scroll-Token and ETag Tracker sent — the total, the next page, the scroll cursor. Trim a large response with the endpoint's own \`fields\` and \`expand\` arguments.`,
+${RETURNS} Trim a large response with the endpoint's own \`fields\` and \`expand\` arguments.`,
     effect: "read",
     input: { tool: TOOL_ARG, args: ARGS_ARG },
     run: async (tracker, { tool: name, args }) => invoke(tracker, "tracker_read", name, args),
@@ -158,7 +161,7 @@ Returns \`{headers, body}\`: \`body\` is the API's own JSON, untouched; \`header
     name: "tracker_call",
     description: `Call a Yandex Tracker endpoint that creates, edits or deletes something. Accepts every endpoint *not* marked \`(read)\` in the catalogue in tracker_api's description.
 
-Get the arguments from tracker_api first — this is the tool that changes data, and a wrong field name is rejected rather than dropped. Returns \`{headers, body}\`: \`body\` is the API's own JSON, untouched; \`headers\` holds whichever of X-Total-Count, X-Total-Pages, Link, X-Scroll-Id, X-Scroll-Token and ETag Tracker sent — the total, the next page, the scroll cursor. A download returns where the file landed instead.`,
+Get the arguments from tracker_api first — this is the tool that changes data, and a wrong field name is rejected rather than dropped. ${RETURNS} A download returns where the file landed instead.`,
     effect: "modify",
     input: { tool: TOOL_ARG, args: ARGS_ARG },
     run: async (tracker, { tool: name, args }) => invoke(tracker, "tracker_call", name, args),

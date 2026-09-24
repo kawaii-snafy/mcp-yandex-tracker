@@ -2,7 +2,8 @@
  * The shape every one of the tools lives in.
  *
  * A tool is one documented Yandex Tracker v3 endpoint and nothing else: the
- * API's own parameter names go in, the API's own JSON comes out. Declaring them
+ * API's own parameter names go in, the API's own JSON comes out — as the `body`
+ * of `Tracker.request()`'s `{ headers, body }`. Declaring them
  * as data rather than as registration calls means the dispatchers, the
  * resources and the `docs/TOOLS.md` generator all read the same list.
  */

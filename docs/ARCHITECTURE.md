@@ -202,8 +202,8 @@ into Node 20+.
   `X-Cloud-Org-Id` when a cloud org id is set, `X-Org-Id` otherwise.
 - **`Tracker.request(method, path, { params, body, headers })`** — the only way
   out. Builds `{baseUrl}/v3{path}`, sends it with the configured timeout — which
-  runs until the response headers arrive, not through the body, so a large
-  download is not cut off — and returns `{ headers, body }`: the decoded body untouched, plus the response
+  covers reading the body too, except on a download, where it ends with the
+  headers so a large attachment is not cut off — and returns `{ headers, body }`: the decoded body untouched, plus the response
   headers the documentation gives a meaning to (`X-Total-Count`,
   `X-Total-Pages`, `Link`, `X-Scroll-Id`, `X-Scroll-Token`, `ETag`) — a
   scrollable search is unusable without its `X-Scroll-Id`. `upload()` returns
@@ -215,7 +215,10 @@ into Node 20+.
 - **Paths** — every path with a value in it is written as
   `` path`/issues/${issueId}` ``: the tag runs each value through
   `encodeURIComponent`, so a `#`, `?` or `/` in an agent-supplied id or file
-  name stays inside its segment.
+  name stays inside its segment. It refuses `""`, `.` and `..` outright — URL
+  resolution drops dot-segments however they are spelled, so a comment id of
+  `..` would address the entity — and leaves `:` and `@` bare, as the docs
+  write them (`/users/login:12345`).
 - **Query spelling** — booleans go out as `true`/`false` rather than JavaScript's
   `String(true)`, and an array value becomes a repeated key, which is how
   `createdAt=from:…&createdAt=to:…` is expressed.
